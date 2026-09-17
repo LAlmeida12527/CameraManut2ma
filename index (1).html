@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tradutor de Libras</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier/dist/knn-classifier.min.js"></script>
+
+    <style>
+        :root { --bg-color: #111827; --panel-bg: #1f2937; --text-main: #f9fafb; --accent: #3b82f6; --success: #10b981; --warning: #f59e0b; --error: #ef4444; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+
+        header { text-align: center; padding: 20px 20px 10px; width: 100%; box-sizing: border-box; }
+        .tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab-btn { background: #374151; color: var(--text-main); border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .tab-btn.active { background: var(--accent); }
+        .tab-btn:hover:not(.active) { background: #4b5563; }
+
+        .container-op { display: none; flex-wrap: wrap; gap: 20px; justify-content: center; max-width: 1200px; padding: 0 20px 40px; width: 100%; box-sizing: border-box; }
+        .container-op.visible { display: flex; }
+        .video-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; width: 640px; max-width: 100%; aspect-ratio: 4 / 3; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+        .panel { background: var(--panel-bg); border-radius: 12px; padding: 20px; width: 300px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
+        .result-box { background: #374151; border-radius: 8px; padding: 20px; text-align: center; }
+        .result-letter { font-size: 80px; font-weight: bold; color: var(--success); margin: 10px 0; min-height: 80px; }
+        .status-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 14px; }
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .badge.active { background: var(--success); color: white; }
+        .badge.inactive { background: var(--error); color: white; }
+        .stability-bar-container { width: 100%; height: 10px; background: #4b5563; border-radius: 5px; margin-top: 5px; overflow: hidden; }
+        .stability-bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.1s; }
+        button.action-btn { background: var(--accent); color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        button.action-btn.secondary { background: #4b5563; }
+        button.action-btn.danger { background: var(--error); }
+        button.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        select.letter-select { background: #374151; color: var(--text-main); border: 1px solid #4b5563; border-radius: 6px; padding: 10px; font-size: 16px; font-weight: bold; }
+        .loading-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 18px; z-index: 10; text-align: center; padding: 0 24px; background: rgba(0,0,0,0.35); }
+        .sample-count { font-size: 14px; color: #d1d5db; }
+        .dataset-controls { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #374151; padding-top: 14px; }
+        .conf-list { font-size: 12px; color: #d1d5db; max-height: 120px; overflow-y: auto; }
+        .conf-row { display: flex; justify-content: space-between; padding: 2px 0; }
+
+        .container-guide { display: none; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 1200px; padding: 0 20px 40px; width: 100%; box-sizing: border-box; }
+        .container-guide.visible { display: grid; }
+        .guide-intro { grid-column: 1 / -1; color: #d1d5db; line-height: 1.6; margin: 0 0 4px; }
+        .guide-card { background: var(--panel-bg); padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); border-left: 4px solid var(--accent); }
+        .guide-letter { font-size: 40px; font-weight: bold; color: var(--accent); margin-bottom: 10px; }
+        .guide-desc { font-size: 14px; color: #d1d5db; line-height: 1.5; }
+        .movement-tag { display: inline-block; background: var(--warning); color: #111827; font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 10px; margin-bottom: 8px; }
+
+        .hint-box { background: rgba(59,130,246,0.12); border: 1px solid var(--accent); border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.5; color: #dbeafe; }
+        .dynamic-toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #e5e7eb; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 6px; cursor: pointer; }
+        .dynamic-toggle-row input { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Tradutor de Libras</h1>
+        <div class="tabs">
+            <button class="tab-btn active" id="btnLive" onclick="switchTab('live')">Tradução ao Vivo</button>
+            <button class="tab-btn" id="btnCollect" onclick="switchTab('collect')">Coletar Dados</button>
+            <button class="tab-btn" id="btnGuide" onclick="switchTab('guide')">Guia de Sinais</button>
+        </div>
+    </header>
+
+    <!-- ===================== ABA: TRADUÇÃO AO VIVO ===================== -->
+    <div class="container-op visible" id="tabLive">
+        <div class="video-container" id="videoContainer">
+            <div id="loadingOverlay" class="loading-text">
+                <div id="loadingMessage">Solicitando acesso à câmera...</div>
+                <button id="retryBtn" class="action-btn" style="display:none;">Tentar novamente</button>
+            </div>
+            <video id="videoShared" autoplay playsinline muted></video>
+            <canvas id="canvasShared"></canvas>
+        </div>
+        <div class="panel">
+            <button id="startAudioBtn" class="action-btn">Habilitar Voz</button>
+            <div class="result-box">
+                <div>Letra Detectada:</div>
+                <div id="resultLetter" class="result-letter">-</div>
+                <div class="stability-bar-container"><div id="stabilityBar" class="stability-bar"></div></div>
+            </div>
+            <div class="status-item"><span>Câmera</span><span id="camStatusLive" class="badge inactive">Aguardando</span></div>
+            <div class="status-item"><span>Mão Detectada</span><span id="handStatusLive" class="badge inactive">Não</span></div>
+            <div class="status-item"><span>Dados treinados</span><span id="datasetStatusLive" class="badge inactive">0 amostras</span></div>
+            <div id="noDataHint" class="hint-box" style="display:none;">
+                Ainda não há dados de treino. Vá na aba <b>Coletar Dados</b> e grave alguns exemplos de cada letra antes de usar a tradução ao vivo.
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== ABA: COLETAR DADOS ===================== -->
+    <div class="container-op" id="tabCollect">
+        <div class="panel">
+            <div class="hint-box">
+                Escolha a letra, faça o sinal e clique em <b>Gravar 3s</b>. Você tem 1s para se posicionar antes de começar a gravar. Enquanto grava, mexa a mão levemente (gire o pulso, aproxime/afaste da câmera) — isso deixa o reconhecimento mais robusto depois. Para letras com movimento (como J e Z), marque a opção abaixo e faça o gesto completo durante a gravação.
+            </div>
+            <select id="letterSelect" class="letter-select"></select>
+            <label class="dynamic-toggle-row" for="dynamicModeCheckbox">
+                <input type="checkbox" id="dynamicModeCheckbox">
+                Sinal com movimento (ex: J, Z) — grava a trajetória completa
+            </label>
+            <div class="sample-count">Amostras desta letra: <b id="letterCount">0</b></div>
+            <button id="recordBtn" class="action-btn">Gravar 3s</button>
+            <button id="clearLetterBtn" class="action-btn secondary">Apagar amostras desta letra</button>
+            <div class="dataset-controls">
+                <div class="sample-count">Total no dataset: <b id="totalCount">0</b> amostras em <b id="totalClasses">0</b> letras</div>
+                <button id="exportBtn" class="action-btn secondary">Exportar dataset.json</button>
+                <button id="importBtn" class="action-btn secondary">Importar dataset.json</button>
+                <input type="file" id="importFile" accept="application/json" style="display:none">
+                <button id="clearAllBtn" class="action-btn danger">Apagar tudo</button>
+            </div>
+            <div class="status-item"><span>Câmera</span><span id="camStatusCollect" class="badge inactive">Aguardando</span></div>
+            <div class="status-item"><span>Mão Detectada</span><span id="handStatusCollect" class="badge inactive">Não</span></div>
+        </div>
+    </div>
+
+    <!-- ===================== ABA: GUIA ===================== -->
+    <div class="container-guide" id="tabGuide"></div>
+
+    <script>
+        // ============================================================
+        // NOTAS DE REVISÃO (v2)
+        // ------------------------------------------------------------
+        // 1) A causa mais provável da câmera "não carregar / demorar":
+        //    o código original abria DUAS câmeras (uma por aba) e
+        //    carregava o modelo de mãos DUAS vezes ao mesmo tempo. Agora
+        //    existe um único vídeo/canvas compartilhado, movido entre as
+        //    abas no DOM — uma só captura de câmera, um só modelo.
+        // 2) Adicionado tratamento de erro real para câmera (permissão
+        //    negada, sem câmera, HTTPS ausente, timeout de modelo) com
+        //    botão "Tentar novamente", em vez de ficar preso em
+        //    "Iniciando câmera..." para sempre.
+        // 3) Alfabeto ampliado de 18 para as 26 letras.
+        // 4) Novo modo de gravação "sinal com movimento": em vez de só
+        //    variar levemente a mão (o que já ajudava, mas não bastava
+        //    para J/Z), grava a trajetória inteira do gesto e compara
+        //    por reamostragem temporal, então a detecção passa a
+        //    aprender com exemplos gravados por você, e não apenas com
+        //    uma pose estática travada no código.
+        // 5) Corrigido bug de versão do dataset salvo (mudança de
+        //    formato) para não apagar silenciosamente o treino salvo de
+        //    usuários antigos — há migração automática do formato v1.
+        // ============================================================
+
+        // ============================================================
+        // CONFIGURAÇÃO GERAL
+        // ============================================================
+        const LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                          "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"];
+        const MOVEMENT_LETTERS = new Set(["J", "Z"]); // marcadas por padrão como "sinal com movimento" ao selecionar
+
+        const BUFFER_SIZE = 15;
+        const CONFIRM_THRESHOLD = 10;
+        const CONFIDENCE_MIN = 0.55;
+        const K_NEIGHBORS = 7;
+        const RECORD_DURATION_MS = 3000;
+        const RECORD_INTERVAL_MS = 100; // ~10 atualizações de UI/s durante a gravação
+        const PREP_COUNTDOWN_S = 1;     // segundos de preparação antes de começar a gravar
+
+        // reconhecimento de gestos com movimento (J, Z, etc.)
+        const DYNAMIC_WINDOW_MS = 1500;      // janela de buffer mantida ao vivo para casar com um template
+        const DYNAMIC_MIN_SPAN_MS = 350;     // duração mínima de movimento antes de tentar casar
+        const DYNAMIC_MAX_GAP_MS = 400;      // se a mão sumir por mais que isso, o gesto é considerado interrompido
+        const DYNAMIC_TEMPLATE_LEN = 10;     // pontos por template após reamostragem
+        const DYNAMIC_CHECK_INTERVAL_MS = 120;
+        // Quanto MENOR, mais rígido o casamento (menos falsos positivos, mas pode não reconhecer
+        // variações do gesto). Ajuste esse valor testando com seus próprios dados gravados.
+        const DYNAMIC_MAX_DISTANCE = 2.2;
+
+        // ============================================================
+        // NAVEGAÇÃO ENTRE ABAS
+        // ============================================================
+        let currentTab = 'live';
+        const videoContainer = document.getElementById('videoContainer');
+
+        function switchTab(tabId) {
+            currentTab = tabId;
+            document.getElementById('btnLive').classList.toggle('active', tabId === 'live');
+            document.getElementById('btnCollect').classList.toggle('active', tabId === 'collect');
+            document.getElementById('btnGuide').classList.toggle('active', tabId === 'guide');
+            document.getElementById('tabLive').classList.toggle('visible', tabId === 'live');
+            document.getElementById('tabCollect').classList.toggle('visible', tabId === 'collect');
+            document.getElementById('tabGuide').classList.toggle('visible', tabId === 'guide');
+
+            // move o vídeo/câmera compartilhado para a aba ativa (sem recriar a câmera).
+            // Na aba "guide" ele fica oculto onde estava, e o processamento de frames pausa.
+            if (tabId === 'live') {
+                document.getElementById('tabLive').insertBefore(videoContainer, document.getElementById('tabLive').firstChild);
+            } else if (tabId === 'collect') {
+                document.getElementById('tabCollect').insertBefore(videoContainer, document.getElementById('tabCollect').firstChild);
+            }
+        }
+        switchTab('live');
+
+        // ============================================================
+        // GUIA DE SINAIS
+        // ============================================================
+        const guideData = [
+            { letter: 'A', desc: 'Mão fechada, polegar encostado na lateral do indicador.' },
+            { letter: 'B', desc: '4 dedos esticados, polegar dobrado na palma.' },
+            { letter: 'C', desc: 'Mão em formato de garra/meia-lua.' },
+            { letter: 'D', desc: 'Apenas dedo indicador para cima.' },
+            { letter: 'E', desc: 'Pontas dos dedos curvadas tocando o polegar, mão fechada.' },
+            { letter: 'F', desc: 'Indicador e polegar tocando-se, outros 3 dedos esticados.' },
+            { letter: 'G', desc: 'Indicador e polegar esticados e paralelos, mão de perfil, demais dedos fechados.' },
+            { letter: 'H', desc: 'Indicador e médio esticados e unidos, na horizontal, mão de perfil (alguns sinalizantes fazem um pequeno movimento lateral).' },
+            { letter: 'I', desc: 'Apenas mindinho para cima.' },
+            { letter: 'J', desc: 'Mindinho esticado; desenha o formato da letra J no ar, como um gancho.', movement: true },
+            { letter: 'K', desc: 'Indicador e médio esticados em V, polegar tocando a base do dedo médio.' },
+            { letter: 'L', desc: 'Polegar e indicador esticados (formato de L).' },
+            { letter: 'M', desc: 'Punho fechado, polegar sob os dedos indicador/médio/anelar.' },
+            { letter: 'N', desc: 'Punho fechado, polegar sob os dedos indicador/médio.' },
+            { letter: 'O', desc: 'Pontas de todos os dedos tocam o polegar, formando um "O".' },
+            { letter: 'P', desc: 'Parecido com o K, porém com a mão apontando para baixo.' },
+            { letter: 'Q', desc: 'Indicador e polegar esticados apontando para baixo, como um gancho.' },
+            { letter: 'R', desc: 'Indicador e médio esticados e cruzados.' },
+            { letter: 'S', desc: 'Punho cerrado, polegar cruzando por cima dos dedos.' },
+            { letter: 'T', desc: 'Punho fechado, polegar entre indicador e médio.' },
+            { letter: 'U', desc: 'Indicador e médio esticados e colados.' },
+            { letter: 'V', desc: 'Indicador e médio esticados e separados.' },
+            { letter: 'W', desc: 'Indicador, médio e anelar esticados e separados.' },
+            { letter: 'X', desc: 'Indicador dobrado em formato de gancho, demais dedos fechados.' },
+            { letter: 'Y', desc: 'Polegar e mindinho esticados, outros dedos fechados.' },
+            { letter: 'Z', desc: 'Indicador esticado; desenha o formato da letra Z no ar.', movement: true }
+        ];
+
+        const guideContainer = document.getElementById('tabGuide');
+        const guideCardsHtml = guideData.map(item => {
+            const tag = item.movement ? '<div class="movement-tag">Movimento</div>' : '';
+            return `<div class="guide-card">${tag}<div class="guide-letter">${item.letter}</div><div class="guide-desc">${item.desc}</div></div>`;
+        }).join('');
+        guideContainer.innerHTML =
+            '<p class="guide-intro">Configurações de mão de referência para o alfabeto manual em Libras. ' +
+            '<strong>Letras com movimento</strong> (marcadas abaixo) têm um pequeno deslocamento da mão — grave-as ' +
+            'na aba "Coletar Dados" com a opção "Sinal com movimento" marcada, para o reconhecimento funcionar melhor. ' +
+            'As descrições aqui são uma referência rápida de estudo; para confirmar cada configuração, consulte um ' +
+            'dicionário oficial de Libras.</p>' + guideCardsHtml;
+
+        const letterSelect = document.getElementById('letterSelect');
+        LETTERS.forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l; opt.textContent = l;
+            letterSelect.appendChild(opt);
+        });
+
+        const dynamicModeCheckbox = document.getElementById('dynamicModeCheckbox');
+
+        // ============================================================
+        // EXTRAÇÃO DE FEATURES (posição/escala/rotação invariante)
+        // Mesma lógica usada para gravar E para reconhecer, senão o
+        // classificador compara coisas diferentes.
+        // ============================================================
+        function extractFeatures(landmarks, handednessLabel) {
+            let pts = landmarks.map(p => ({ x: p.x, y: p.y }));
+
+            const wrist = pts[0];
+            pts = pts.map(p => ({ x: p.x - wrist.x, y: p.y - wrist.y }));
+
+            // alinhar rotação: pulso -> base do dedo médio (9) sempre "para cima"
+            const ref = pts[9];
+            const angle = Math.atan2(ref.x, -ref.y);
+            const cosA = Math.cos(-angle), sinA = Math.sin(-angle);
+            pts = pts.map(p => ({
+                x: p.x * cosA - p.y * sinA,
+                y: p.x * sinA + p.y * cosA
+            }));
+
+            // normalizar escala pelo tamanho da palma
+            let scale = Math.hypot(pts[9].x, pts[9].y);
+            if (scale < 1e-6) scale = 1e-6;
+            pts = pts.map(p => ({ x: p.x / scale, y: p.y / scale }));
+
+            // espelhar mão esquerda para o mesmo referencial da direita
+            if (handednessLabel === 'Left') {
+                pts = pts.map(p => ({ x: -p.x, y: p.y }));
+            }
+
+            const feats = [];
+            pts.forEach(p => { feats.push(p.x, p.y); });
+            return feats; // vetor de 42 números
+        }
+
+        // ============================================================
+        // RECONHECIMENTO DE GESTOS COM MOVIMENTO (J, Z, ...)
+        // Estratégia: reamostrar a sequência gravada (posições ao longo
+        // do tempo) para um número fixo de pontos e comparar por
+        // distância euclidiana contra os templates gravados pelo
+        // usuário — em vez de confiar numa regra fixa no código.
+        // ============================================================
+        function euclideanDistance(a, b) {
+            let sum = 0;
+            for (let i = 0; i < a.length; i++) {
+                const d = a[i] - b[i];
+                sum += d * d;
+            }
+            return Math.sqrt(sum);
+        }
+
+        // corta os trechos "parados" no início/fim do buffer, para o template
+        // representar principalmente a parte em movimento do gesto.
+        function trimStaticEdges(buffer, moveThreshold = 0.03) {
+            if (buffer.length < 3) return buffer;
+            let startIdx = 0, endIdx = buffer.length - 1;
+            for (let i = 1; i < buffer.length; i++) {
+                if (euclideanDistance(buffer[i].feats, buffer[0].feats) > moveThreshold) {
+                    startIdx = Math.max(0, i - 1);
+                    break;
+                }
+            }
+            for (let i = buffer.length - 2; i >= 0; i--) {
+                if (euclideanDistance(buffer[i].feats, buffer[buffer.length - 1].feats) > moveThreshold) {
+                    endIdx = Math.min(buffer.length - 1, i + 1);
+                    break;
+                }
+            }
+            if (endIdx - startIdx < 1) return buffer; // não achou um trecho claro de movimento, usa tudo
+            return buffer.slice(startIdx, endIdx + 1);
+        }
+
+        function resampleToTemplate(buffer, len) {
+            if (!buffer || buffer.length < 2) return null;
+            const t0 = buffer[0].t, t1 = buffer[buffer.length - 1].t;
+            const span = t1 - t0;
+            if (span <= 0) return null;
+
+            const out = [];
+            for (let i = 0; i < len; i++) {
+                const targetT = t0 + (i / (len - 1)) * span;
+                let j = 0;
+                while (j < buffer.length - 1 && buffer[j + 1].t < targetT) j++;
+                const a = buffer[j];
+                const b = buffer[Math.min(j + 1, buffer.length - 1)];
+                const localFrac = (b.t === a.t) ? 0 : (targetT - a.t) / (b.t - a.t);
+                for (let k = 0; k < a.feats.length; k++) {
+                    out.push(a.feats[k] + (b.feats[k] - a.feats[k]) * localFrac);
+                }
+            }
+            return out;
+        }
+
+        function buildDynamicTemplate(buffer) {
+            const trimmed = trimStaticEdges(buffer);
+            const source = trimmed.length >= 2 ? trimmed : buffer;
+            return resampleToTemplate(source, DYNAMIC_TEMPLATE_LEN);
+        }
+
+        function matchDynamicTemplates(buffer, templates) {
+            if (!buffer || buffer.length < 2) return null;
+            const span = buffer[buffer.length - 1].t - buffer[0].t;
+            if (span < DYNAMIC_MIN_SPAN_MS) return null;
+
+            const sample = buildDynamicTemplate(buffer);
+            if (!sample) return null;
+
+            let best = null;
+            for (const letter of Object.keys(templates)) {
+                for (const tmpl of templates[letter]) {
+                    const d = euclideanDistance(sample, tmpl);
+                    if (!best || d < best.distance) best = { letter, distance: d };
+                }
+            }
+            if (best && best.distance <= DYNAMIC_MAX_DISTANCE) return best;
+            return null;
+        }
+
+        // ============================================================
+        // CLASSIFICADOR KNN (roda 100% no navegador, via TensorFlow.js)
+        // + templates de gestos com movimento (guardados à parte)
+        // ============================================================
+        const classifier = knnClassifier.create();
+        let dynamicTemplates = {}; // { LETRA: [ [vetor reamostrado], ... ] }
+
+        const STORAGE_KEY = 'libras_dataset_v2';
+        const LEGACY_STORAGE_KEY = 'libras_dataset_v1'; // formato antigo, só com letras estáticas
+
+        function datasetToPlainObject() {
+            const dataset = classifier.getClassifierDataset();
+            const obj = {};
+            Object.keys(dataset).forEach(label => {
+                obj[label] = { data: dataset[label].arraySync(), shape: dataset[label].shape };
+            });
+            return obj;
+        }
+
+        function datasetToExportObject() {
+            return { version: 2, static: datasetToPlainObject(), dynamic: dynamicTemplates };
+        }
+
+        function loadDatasetFromPlainObject(obj) {
+            const tensorObj = {};
+            Object.keys(obj).forEach(label => {
+                tensorObj[label] = tf.tensor(obj[label].data, obj[label].shape, 'float32');
+            });
+            classifier.setClassifierDataset(tensorObj);
+        }
+
+        // aceita tanto o formato novo ({version:2, static, dynamic}) quanto o
+        // formato antigo (objeto puro {LETRA: {data, shape}}), para não perder
+        // dataset já treinado por quem estava usando a versão anterior.
+        function loadDatasetFromExportObject(obj) {
+            if (!obj) return;
+            if (obj.version === 2 && obj.static) {
+                loadDatasetFromPlainObject(obj.static);
+                dynamicTemplates = obj.dynamic || {};
+            } else {
+                loadDatasetFromPlainObject(obj);
+                dynamicTemplates = {};
+            }
+        }
+
+        function saveToLocalStorage() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(datasetToExportObject()));
+            } catch (e) {
+                console.error('Não foi possível salvar no localStorage:', e);
+            }
+        }
+
+        function loadFromLocalStorage() {
+            try {
+                let raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    loadDatasetFromExportObject(JSON.parse(raw));
+                    return true;
+                }
+                // migração automática do formato antigo (v1), se existir
+                raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+                if (raw) {
+                    loadDatasetFromExportObject(JSON.parse(raw));
+                    saveToLocalStorage(); // já grava no novo formato/chave
+                    return true;
+                }
+                return false;
+            } catch (e) {
+                console.error('Não foi possível carregar do localStorage:', e);
+                return false;
+            }
+        }
+
+        // Se o navegador não tiver nada salvo, tenta carregar um
+        // dataset.json publicado junto do site (você gera esse arquivo
+        // pelo botão "Exportar" depois de treinar, e sobe pro GitHub).
+        async function tryLoadBundledDataset() {
+            try {
+                const resp = await fetch('dataset.json');
+                if (!resp.ok) return false;
+                const obj = await resp.json();
+                loadDatasetFromExportObject(obj);
+                return true;
+            } catch (e) {
+                return false; // sem dataset.json publicado, tudo bem
+            }
+        }
+
+        function updateDatasetUI() {
+            const counts = classifier.getClassExampleCount();
+            const currentLetter = letterSelect.value;
+            const staticTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+            const dynamicTotalForLetter = (dynamicTemplates[currentLetter] || []).length;
+            const dynamicGrandTotal = Object.values(dynamicTemplates).reduce((a, arr) => a + arr.length, 0);
+
+            const lettersWithData = new Set([
+                ...Object.keys(counts).filter(k => counts[k] > 0),
+                ...Object.keys(dynamicTemplates).filter(k => dynamicTemplates[k].length > 0)
+            ]);
+
+            const grandTotal = staticTotal + dynamicGrandTotal;
+
+            document.getElementById('letterCount').textContent =
+                `${counts[currentLetter] || 0} estáticas + ${dynamicTotalForLetter} com movimento`;
+            document.getElementById('totalCount').textContent = grandTotal;
+            document.getElementById('totalClasses').textContent = lettersWithData.size;
+
+            const badge = document.getElementById('datasetStatusLive');
+            badge.textContent = `${grandTotal} amostras`;
+            badge.className = grandTotal > 0 ? 'badge active' : 'badge inactive';
+            document.getElementById('noDataHint').style.display = grandTotal > 0 ? 'none' : 'block';
+        }
+
+        letterSelect.addEventListener('change', () => {
+            dynamicModeCheckbox.checked = MOVEMENT_LETTERS.has(letterSelect.value);
+            updateDatasetUI();
+        });
+
+        document.getElementById('clearLetterBtn').addEventListener('click', () => {
+            const letter = letterSelect.value;
+            let changed = false;
+            if (classifier.getClassExampleCount()[letter]) {
+                classifier.clearClass(letter);
+                changed = true;
+            }
+            if (dynamicTemplates[letter] && dynamicTemplates[letter].length) {
+                delete dynamicTemplates[letter];
+                changed = true;
+            }
+            if (changed) {
+                saveToLocalStorage();
+                updateDatasetUI();
+            }
+        });
+
+        document.getElementById('clearAllBtn').addEventListener('click', () => {
+            if (confirm('Apagar TODAS as amostras gravadas (estáticas e com movimento)? Essa ação não pode ser desfeita.')) {
+                classifier.clearAllClasses();
+                dynamicTemplates = {};
+                saveToLocalStorage();
+                updateDatasetUI();
+            }
+        });
+
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            const blob = new Blob([JSON.stringify(datasetToExportObject())], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'dataset.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('importFile').click();
+        });
+
+        document.getElementById('importFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                loadDatasetFromExportObject(JSON.parse(text));
+                saveToLocalStorage();
+                updateDatasetUI();
+            } catch (err) {
+                alert('Não consegui ler esse arquivo como dataset.json válido.');
+            }
+            e.target.value = '';
+        });
+
+        // ============================================================
+        // GRAVAÇÃO (aba Coletar Dados)
+        // ============================================================
+        let recording = false;
+        let countingDown = false;
+        let recordTimer = null;
+        let recordEndTime = 0;
+        let collectDynamicBuffer = [];
+
+        document.getElementById('recordBtn').addEventListener('click', () => {
+            if (recording || countingDown) return;
+            const btn = document.getElementById('recordBtn');
+            btn.disabled = true;
+
+            let prep = PREP_COUNTDOWN_S;
+            countingDown = true;
+            btn.textContent = `Prepare-se... ${prep}`;
+            const prepTimer = setInterval(() => {
+                prep -= 1;
+                if (prep <= 0) {
+                    clearInterval(prepTimer);
+                    countingDown = false;
+                    beginRecording();
+                } else {
+                    btn.textContent = `Prepare-se... ${prep}`;
+                }
+            }, 1000);
+        });
+
+        function beginRecording() {
+            recording = true;
+            collectDynamicBuffer = [];
+            recordEndTime = performance.now() + RECORD_DURATION_MS;
+            const btn = document.getElementById('recordBtn');
+
+            recordTimer = setInterval(() => {
+                const remaining = Math.max(0, recordEndTime - performance.now());
+                btn.textContent = `Gravando... ${(remaining / 1000).toFixed(1)}s`;
+                if (remaining <= 0) {
+                    clearInterval(recordTimer);
+                    recording = false;
+                    finalizeRecording();
+                    btn.disabled = false;
+                    btn.textContent = 'Gravar 3s';
+                }
+            }, RECORD_INTERVAL_MS);
+        }
+
+        function finalizeRecording() {
+            if (dynamicModeCheckbox.checked) {
+                const tmpl = buildDynamicTemplate(collectDynamicBuffer);
+                if (tmpl) {
+                    const letter = letterSelect.value;
+                    if (!dynamicTemplates[letter]) dynamicTemplates[letter] = [];
+                    dynamicTemplates[letter].push(tmpl);
+                } else {
+                    alert('Não deu para capturar o movimento dessa vez. Tente de novo fazendo o gesto durante os 3 segundos de gravação.');
+                }
+            }
+            collectDynamicBuffer = [];
+            saveToLocalStorage();
+            updateDatasetUI();
+        }
+
+        // ============================================================
+        // MEDIAPIPE HANDS — pipeline único, compartilhado entre as abas
+        // ============================================================
+        const mpHands = window.Hands;
+        const mpDrawing = { drawConnectors: window.drawConnectors, drawLandmarks: window.drawLandmarks };
+
+        const videoEl = document.getElementById('videoShared');
+        const canvasEl = document.getElementById('canvasShared');
+        const ctx = canvasEl.getContext('2d');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingMessageEl = document.getElementById('loadingMessage');
+        const retryBtn = document.getElementById('retryBtn');
+
+        function showLoading(msg) {
+            loadingOverlay.style.display = 'flex';
+            loadingMessageEl.textContent = msg;
+            retryBtn.style.display = 'none';
+        }
+        function showError(msg) {
+            loadingOverlay.style.display = 'flex';
+            loadingMessageEl.textContent = msg;
+            retryBtn.style.display = 'inline-block';
+        }
+        function hideOverlay() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        let hands = null;
+        let currentStream = null;
+        let firstResultReceived = false;
+        let readinessTimeoutId = null;
+        let pipelineFrameHandle = null;
+
+        function cameraErrorMessage(err) {
+            switch (err && err.name) {
+                case 'NotAllowedError':
+                case 'PermissionDeniedError':
+                    return 'Permissão da câmera negada. Habilite o acesso à câmera para este site nas configurações do navegador e clique em "Tentar novamente".';
+                case 'NotFoundError':
+                case 'DevicesNotFoundError':
+                    return 'Nenhuma câmera foi encontrada neste dispositivo.';
+                case 'NotReadableError':
+                case 'TrackStartError':
+                    return 'A câmera parece estar em uso por outro aplicativo ou aba. Feche-o e tente novamente.';
+                case 'OverconstrainedError':
+                    return 'Não foi possível configurar a câmera com a resolução solicitada. Tente novamente.';
+                default:
+                    return `Ocorreu um erro ao acessar a câmera${err && err.message ? ': ' + err.message : ''}. Tente novamente.`;
+            }
+        }
+
+        async function startPipeline() {
+            firstResultReceived = false;
+            if (readinessTimeoutId) clearTimeout(readinessTimeoutId);
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+                currentStream = null;
+            }
+
+            showLoading('Solicitando acesso à câmera...');
+
+            if (!window.isSecureContext) {
+                showError('A câmera só funciona em conexões seguras (HTTPS) ou em localhost. Publique esta página em um serviço com HTTPS, como GitHub Pages, Netlify ou Vercel, e abra por esse endereço (não pelo arquivo local).');
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showError('Este navegador não tem suporte a acesso de câmera (getUserMedia). Tente um navegador atualizado, como Chrome, Edge ou Firefox.');
+                return;
+            }
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+                    audio: false
+                });
+            } catch (err) {
+                showError(cameraErrorMessage(err));
+                return;
+            }
+
+            videoEl.srcObject = currentStream;
+            try { await videoEl.play(); } catch (e) { /* autoplay mudo costuma ser permitido; ignora se falhar aqui */ }
+
+            showLoading('Carregando modelo de reconhecimento de mãos...');
+
+            hands = new mpHands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+            hands.onResults(onHandsResults);
+
+            // pré-carrega o modelo quando o navegador suportar; se essa chamada
+            // não existir ou falhar, o timeout de segurança abaixo garante que o
+            // usuário nunca fique preso na tela de carregamento.
+            try {
+                if (typeof hands.initialize === 'function') {
+                    await hands.initialize();
+                }
+            } catch (e) {
+                console.warn('hands.initialize() falhou, seguindo mesmo assim:', e);
+            }
+
+            readinessTimeoutId = setTimeout(() => {
+                if (!firstResultReceived) {
+                    showError('Não foi possível carregar o modelo de reconhecimento (demorou demais). Verifique sua conexão com a internet e tente novamente.');
+                }
+            }, 15000);
+
+            runFrameLoop();
+        }
+
+        function runFrameLoop() {
+            if (pipelineFrameHandle) cancelAnimationFrame(pipelineFrameHandle);
+            function loop() {
+                pipelineFrameHandle = requestAnimationFrame(loop);
+                if (currentTab === 'guide') return; // pausa fora das abas com câmera, economiza bateria/CPU
+                if (videoEl.readyState >= 2 && hands) {
+                    hands.send({ image: videoEl }).catch(err => console.error('Erro ao processar frame:', err));
+                }
+            }
+            loop();
+        }
+
+        function onHandsResults(results) {
+            if (!firstResultReceived) {
+                firstResultReceived = true;
+                if (readinessTimeoutId) clearTimeout(readinessTimeoutId);
+                hideOverlay();
+            }
+
+            document.getElementById('camStatusLive').className = 'badge active';
+            document.getElementById('camStatusLive').textContent = 'Operante';
+            document.getElementById('camStatusCollect').className = 'badge active';
+            document.getElementById('camStatusCollect').textContent = 'Operante';
+
+            canvasEl.width = videoEl.videoWidth;
+            canvasEl.height = videoEl.videoHeight;
+            ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                document.getElementById('handStatusLive').className = 'badge active';
+                document.getElementById('handStatusLive').textContent = 'Sim';
+                document.getElementById('handStatusCollect').className = 'badge active';
+                document.getElementById('handStatusCollect').textContent = 'Sim';
+
+                const lm = results.multiHandLandmarks[0];
+                const handedness = results.multiHandedness[0].label;
+
+                mpDrawing.drawConnectors(ctx, lm, window.HAND_CONNECTIONS, { color: '#ffffff', lineWidth: 2 });
+                mpDrawing.drawLandmarks(ctx, lm, { color: '#3b82f6', lineWidth: 1, radius: 3 });
+
+                dispatchLandmarks(lm, handedness);
+            } else {
+                document.getElementById('handStatusLive').className = 'badge inactive';
+                document.getElementById('handStatusLive').textContent = 'Não';
+                document.getElementById('handStatusCollect').className = 'badge inactive';
+                document.getElementById('handStatusCollect').textContent = 'Não';
+                dispatchLandmarks(null, null);
+            }
+        }
+
+        function dispatchLandmarks(lm, handedness) {
+            if (currentTab === 'live') {
+                handleLiveLandmarks(lm, handedness);
+            } else if (currentTab === 'collect') {
+                handleCollectLandmarks(lm, handedness);
+            }
+        }
+
+        retryBtn.addEventListener('click', () => { startPipeline(); });
+
+        // --- Pipeline da aba "Ao Vivo" ---
+        let liveBuffer = [];
+        let lastSpoken = null;
+        let audioEnabled = false;
+        const synth = window.speechSynthesis;
+
+        document.getElementById('startAudioBtn').addEventListener('click', (e) => {
+            audioEnabled = true;
+            e.target.style.display = 'none';
+            synth.speak(new SpeechSynthesisUtterance(''));
+        });
+
+        function confirmLetter(letter) {
+            const resultLetter = document.getElementById('resultLetter');
+            if (resultLetter.textContent !== letter) {
+                resultLetter.textContent = letter;
+                if (audioEnabled && synth && letter !== lastSpoken) {
+                    lastSpoken = letter;
+                    const u = new SpeechSynthesisUtterance(letter);
+                    u.lang = 'pt-BR';
+                    synth.speak(u);
+                }
+            }
+        }
+
+        let dynamicLiveBuffer = [];
+        let lastHandSeenAt = 0;
+        let lastDynamicCheck = 0;
+
+        async function handleLiveLandmarks(lm, handedness) {
+            const now = performance.now();
+            const stabilityBar = document.getElementById('stabilityBar');
+            const resultLetter = document.getElementById('resultLetter');
+
+            // mantém o buffer de movimento (para letras dinâmicas como J/Z)
+            if (lm) {
+                lastHandSeenAt = now;
+                dynamicLiveBuffer.push({ t: now, feats: extractFeatures(lm, handedness) });
+            } else if (now - lastHandSeenAt > DYNAMIC_MAX_GAP_MS) {
+                dynamicLiveBuffer = [];
+            }
+            dynamicLiveBuffer = dynamicLiveBuffer.filter(p => now - p.t <= DYNAMIC_WINDOW_MS);
+
+            // 1) tenta casar com um gesto de movimento gravado (throttled)
+            const hasDynamicTemplates = Object.keys(dynamicTemplates).length > 0;
+            if (hasDynamicTemplates && now - lastDynamicCheck >= DYNAMIC_CHECK_INTERVAL_MS) {
+                lastDynamicCheck = now;
+                const dynMatch = matchDynamicTemplates(dynamicLiveBuffer, dynamicTemplates);
+                if (dynMatch) {
+                    confirmLetter(dynMatch.letter);
+                    stabilityBar.style.width = '100%';
+                    stabilityBar.style.background = 'var(--success)';
+                    dynamicLiveBuffer = []; // evita disparar de novo com o mesmo movimento
+                    return;
+                }
+            }
+
+            // 2) classificação estática (pose atual) + votação de estabilidade
+            let detectedLetter = null;
+            const totalExamples = Object.values(classifier.getClassExampleCount()).reduce((a, b) => a + b, 0);
+
+            if (lm && totalExamples > 0) {
+                const feats = extractFeatures(lm, handedness);
+                const result = await classifier.predictClass(tf.tensor1d(feats), K_NEIGHBORS);
+                const confidence = result.confidences[result.label] || 0;
+                if (confidence >= CONFIDENCE_MIN) {
+                    detectedLetter = result.label;
+                }
+            }
+
+            liveBuffer.push(detectedLetter);
+            if (liveBuffer.length > BUFFER_SIZE) liveBuffer.shift();
+
+            const counts = {};
+            let max = 0, dom = null;
+            for (const l of liveBuffer) {
+                if (l) { counts[l] = (counts[l] || 0) + 1; if (counts[l] > max) { max = counts[l]; dom = l; } }
+            }
+
+            stabilityBar.style.width = `${Math.min((max / CONFIRM_THRESHOLD) * 100, 100)}%`;
+            stabilityBar.style.background = max >= CONFIRM_THRESHOLD ? 'var(--success)' : 'var(--warning)';
+
+            if (max >= CONFIRM_THRESHOLD && dom) {
+                confirmLetter(dom);
+            } else if (max === 0) {
+                resultLetter.textContent = '-';
+                stabilityBar.style.width = '0%';
+                lastSpoken = null;
+            }
+        }
+
+        // --- Pipeline da aba "Coletar Dados" ---
+        function handleCollectLandmarks(lm, handedness) {
+            if (!recording || !lm) return;
+            const feats = extractFeatures(lm, handedness);
+            if (dynamicModeCheckbox.checked) {
+                collectDynamicBuffer.push({ t: performance.now(), feats });
+            } else {
+                classifier.addExample(tf.tensor1d(feats), letterSelect.value);
+                updateDatasetUI();
+            }
+        }
+
+        // ============================================================
+        // INICIALIZAÇÃO
+        // ============================================================
+        (async function init() {
+            const hadLocal = loadFromLocalStorage();
+            if (!hadLocal) {
+                await tryLoadBundledDataset();
+            }
+            updateDatasetUI();
+            startPipeline();
+        })();
+    </script>
+</body>
+</html>
