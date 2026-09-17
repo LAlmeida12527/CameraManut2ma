@@ -22,7 +22,8 @@
 
         .container-op { display: none; flex-wrap: wrap; gap: 20px; justify-content: center; max-width: 1200px; padding: 0 20px 40px; width: 100%; box-sizing: border-box; }
         .container-op.visible { display: flex; }
-        .video-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; width: 640px; max-width: 100%; aspect-ratio: 4 / 3; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+        /* TAMANHO DA CÂMERA AUMENTADO AQUI (de 640px para 800px) */
+        .video-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; width: 800px; max-width: 100%; aspect-ratio: 4 / 3; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
         .panel { background: var(--panel-bg); border-radius: 12px; padding: 20px; width: 300px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
         .result-box { background: #374151; border-radius: 8px; padding: 20px; text-align: center; }
