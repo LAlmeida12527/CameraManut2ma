@@ -11,8 +11,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier/dist/knn-classifier.min.js"></script>
 
     <style>
-        :root { --bg-color: #111827; --panel-bg: #1f2937; --text-main: #f9fafb; --accent: #3b82f6; --success: #10b981; --warning: #f59e0b; --error: #ef4444; }
-        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+       :root { --bg-color: #111827; --panel-bg: #1f2937; --text-main: #f9fafb; --accent: #3b82f6; --success: #10b981; --warning: #f59e0b; --error: #ef4444; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow-x: hidden; }
 
         header { text-align: center; padding: 20px 20px 10px; width: 100%; box-sizing: border-box; }
         .tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
@@ -22,10 +22,11 @@
 
         .container-op { display: none; flex-wrap: wrap; gap: 20px; justify-content: center; max-width: 1200px; padding: 0 20px 40px; width: 100%; box-sizing: border-box; }
         .container-op.visible { display: flex; }
-        /* TAMANHO DA CÂMERA AUMENTADO AQUI (de 640px para 800px) */
+        
         .video-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; width: 800px; max-width: 100%; aspect-ratio: 4 / 3; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
-        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
-        .panel { background: var(--panel-bg); border-radius: 12px; padding: 20px; width: 300px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); object-fit: cover; }
+        
+        .panel { background: var(--panel-bg); border-radius: 12px; padding: 20px; width: 300px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
         .result-box { background: #374151; border-radius: 8px; padding: 20px; text-align: center; }
         .result-letter { font-size: 80px; font-weight: bold; color: var(--success); margin: 10px 0; min-height: 80px; }
         .status-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 14px; }
@@ -56,6 +57,25 @@
         .hint-box { background: rgba(59,130,246,0.12); border: 1px solid var(--accent); border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.5; color: #dbeafe; }
         .dynamic-toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #e5e7eb; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 6px; cursor: pointer; }
         .dynamic-toggle-row input { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+
+        /* ========================================================= */
+        /* AJUSTES DE RESPONSIVIDADE PARA TELAS MENORES (CELULARES)  */
+        /* ========================================================= */
+        @media (max-width: 768px) {
+            header { padding: 15px 10px 5px; }
+            .tabs { gap: 6px; }
+            .tab-btn { padding: 8px 12px; font-size: 13px; }
+            .container-op, .container-guide { padding: 0 10px 20px; gap: 15px; }
+            
+            /* Câmera ocupando toda a largura no celular */
+            .video-container { width: 100%; border-radius: 8px; }
+            
+            /* Painel lateral desce e ocupa 100% da largura */
+            .panel { width: 100%; padding: 15px; }
+            
+            /* Dá uma ajustada na letra pra caber melhor na tela menor */
+            .result-letter { font-size: 60px; min-height: 60px; }
+        }
     </style>
 </head>
 <body>
