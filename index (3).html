@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tradutor de Libras</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier/dist/knn-classifier.min.js"></script>
+
+    <style>
+        :root { --bg-color: #111827; --panel-bg: #1f2937; --text-main: #f9fafb; --accent: #3b82f6; --success: #10b981; --warning: #f59e0b; --error: #ef4444; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+
+        header { text-align: center; padding: 20px 20px 10px; width: 100%; box-sizing: border-box; }
+        .tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab-btn { background: #374151; color: var(--text-main); border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .tab-btn.active { background: var(--accent); }
+        .tab-btn:hover:not(.active) { background: #4b5563; }
+
+        .legacy-banner { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; background: rgba(245,158,11,0.15); border: 1px solid var(--warning); border-radius: 8px; padding: 12px 16px; margin: 0 20px 16px; max-width: 1160px; width: calc(100% - 40px); box-sizing: border-box; font-size: 13px; line-height: 1.5; }
+        .legacy-banner .btn-row { display: flex; gap: 8px; flex-shrink: 0; }
+
+        .container-op { display: none; flex-wrap: wrap; gap: 20px; justify-content: center; max-width: 1200px; padding: 0 20px 40px; width: 100%; box-sizing: border-box; }
+        .container-op.visible { display: flex; }
+        .video-container { position: relative; background: #000; border-radius: 12px; overflow: hidden; width: 640px; max-width: 100%; aspect-ratio: 4 / 3; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+        .panel { background: var(--panel-bg); border-radius: 12px; padding: 20px; width: 320px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
+        .result-box { background: #374151; border-radius: 8px; padding: 20px; text-align: center; }
+        .result-letter { font-size: 64px; font-weight: bold; color: var(--success); margin: 10px 0; min-height: 70px; line-height: 1.05; word-break: break-word; }
+        .quality-message { display: none; color: var(--warning); font-size: 13px; margin-top: 6px; line-height: 1.4; }
+        .verification-hint { font-size: 11px; color: #9ca3af; margin-top: 8px; }
+        .status-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 14px; }
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .badge.active { background: var(--success); color: white; }
+        .badge.inactive { background: var(--error); color: white; }
+        .badge.warning-badge { background: var(--warning); color: #111827; }
+        .stability-bar-container { width: 100%; height: 10px; background: #4b5563; border-radius: 5px; margin-top: 5px; overflow: hidden; }
+        .stability-bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.1s; }
+        button.action-btn { background: var(--accent); color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        button.action-btn.secondary { background: #4b5563; }
+        button.action-btn.danger { background: var(--error); }
+        button.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        select.letter-select { background: #374151; color: var(--text-main); border: 1px solid #4b5563; border-radius: 6px; padding: 10px; font-size: 16px; font-weight: bold; }
+        .loading-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 18px; z-index: 10; text-align: center; padding: 0 24px; background: rgba(0,0,0,0.35); }
+        .sample-count { font-size: 14px; color: #d1d5db; }
+        .dataset-controls { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #374151; padding-top: 14px; }
+
+        .sensor-panel { display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.15); border-radius: 8px; padding: 12px; }
+        .sensor-title { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; font-weight: bold; color: #e5e7eb; margin-bottom: 4px; }
+        .sensor-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #d1d5db; }
+        .sensor-row span:first-child { width: 64px; flex-shrink: 0; }
+        .sensor-bar-bg { flex: 1; height: 8px; background: #374151; border-radius: 4px; overflow: hidden; }
+        .sensor-bar-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.15s; }
+        .sensor-pct { width: 42px; text-align: right; flex-shrink: 0; }
+
+        .container-guide { display: none; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 1200px; padding: 0 20px 40px; width: 100%; box-sizing: border-box; }
+        .container-guide.visible { display: grid; }
+        .guide-intro { grid-column: 1 / -1; color: #d1d5db; line-height: 1.6; margin: 0 0 4px; }
+        .guide-card { background: var(--panel-bg); padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); border-left: 4px solid var(--accent); }
+        .guide-letter { font-size: 40px; font-weight: bold; color: var(--accent); margin-bottom: 10px; }
+        .guide-desc { font-size: 14px; color: #d1d5db; line-height: 1.5; }
+        .movement-tag { display: inline-block; background: var(--warning); color: #111827; font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 10px; margin-bottom: 8px; }
+
+        .hint-box { background: rgba(59,130,246,0.12); border: 1px solid var(--accent); border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.5; color: #dbeafe; }
+        .hint-box.warn { background: rgba(245,158,11,0.12); border-color: var(--warning); color: #fde68a; }
+        .dynamic-toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #e5e7eb; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 6px; cursor: pointer; }
+        .dynamic-toggle-row input { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Tradutor de Libras</h1>
+        <div class="tabs">
+            <button class="tab-btn active" id="btnLive" onclick="switchTab('live')">Tradução ao Vivo</button>
+            <button class="tab-btn" id="btnCollect" onclick="switchTab('collect')">Coletar Dados</button>
+            <button class="tab-btn" id="btnGuide" onclick="switchTab('guide')">Guia de Sinais</button>
+        </div>
+    </header>
+
+    <div id="legacyWarningBanner" class="legacy-banner" style="display:none;">
+        <div id="legacyWarningText"></div>
+        <div class="btn-row">
+            <button id="downloadLegacyBtn" class="action-btn secondary">Baixar backup antigo</button>
+            <button id="dismissLegacyBtn" class="action-btn secondary">Dispensar aviso</button>
+        </div>
+    </div>
+
+    <!-- ===================== ABA: TRADUÇÃO AO VIVO ===================== -->
+    <div class="container-op visible" id="tabLive">
+        <div class="video-container" id="videoContainer">
+            <div id="loadingOverlay" class="loading-text">
+                <div id="loadingMessage">Solicitando acesso à câmera...</div>
+                <button id="retryBtn" class="action-btn" style="display:none;">Tentar novamente</button>
+            </div>
+            <video id="videoShared" autoplay playsinline muted></video>
+            <canvas id="canvasShared"></canvas>
+        </div>
+        <div class="panel">
+            <button id="startAudioBtn" class="action-btn">Habilitar Voz</button>
+            <div class="result-box">
+                <div>Letra Detectada:</div>
+                <div id="resultLetter" class="result-letter">-</div>
+                <div class="stability-bar-container"><div id="stabilityBar" class="stability-bar"></div></div>
+                <div id="qualityMessage" class="quality-message"></div>
+                <div id="verificationHint" class="verification-hint">Verificação: —</div>
+            </div>
+            <div class="status-item"><span>Mão Detectada</span><span id="handStatusLive" class="badge inactive">Não</span></div>
+
+            <div class="sensor-panel">
+                <div class="sensor-title">
+                    <span>Simulação dos Sensores</span>
+                    <span id="qualityBadge" class="badge inactive">Qualidade: —</span>
+                </div>
+                <div class="sensor-row"><span>Polegar</span><div class="sensor-bar-bg"><div id="sensorThumb" class="sensor-bar-fill"></div></div><span id="sensorThumbPct" class="sensor-pct">—</span></div>
+                <div class="sensor-row"><span>Indicador</span><div class="sensor-bar-bg"><div id="sensorIndex" class="sensor-bar-fill"></div></div><span id="sensorIndexPct" class="sensor-pct">—</span></div>
+                <div class="sensor-row"><span>Médio</span><div class="sensor-bar-bg"><div id="sensorMiddle" class="sensor-bar-fill"></div></div><span id="sensorMiddlePct" class="sensor-pct">—</span></div>
+                <div class="sensor-row"><span>Anelar</span><div class="sensor-bar-bg"><div id="sensorRing" class="sensor-bar-fill"></div></div><span id="sensorRingPct" class="sensor-pct">—</span></div>
+                <div class="sensor-row"><span>Mindinho</span><div class="sensor-bar-bg"><div id="sensorPinky" class="sensor-bar-fill"></div></div><span id="sensorPinkyPct" class="sensor-pct">—</span></div>
+                <div class="sensor-row"><span>Inclinação</span><span id="sensorIncl" class="sensor-pct" style="margin-left:auto;">—</span></div>
+            </div>
+
+            <div id="noDataHint" class="hint-box" style="display:none;"></div>
+        </div>
+    </div>
+
+    <!-- ===================== ABA: COLETAR DADOS ===================== -->
+    <div class="container-op" id="tabCollect">
+        <div class="panel">
+            <div class="hint-box">
+                Escolha a letra, faça o sinal e clique em <b>Gravar 3s</b>. Você tem 1s para se posicionar antes de começar a gravar. Enquanto grava, mexa a mão levemente (gire o pulso, aproxime/afaste da câmera) — isso deixa o reconhecimento mais robusto depois. Para letras com movimento (como J e Z), marque a opção abaixo e faça o gesto completo durante a gravação.
+            </div>
+            <select id="letterSelect" class="letter-select"></select>
+            <label class="dynamic-toggle-row" for="dynamicModeCheckbox">
+                <input type="checkbox" id="dynamicModeCheckbox">
+                Sinal com movimento (ex: J, Z) — grava a trajetória completa
+            </label>
+            <div class="sample-count">Amostras desta letra: <b id="letterCount">0</b></div>
+            <button id="recordBtn" class="action-btn">Gravar 3s</button>
+            <button id="clearLetterBtn" class="action-btn secondary">Apagar amostras desta letra</button>
+            <div class="dataset-controls">
+                <div class="sample-count">Total no dataset: <b id="totalCount">0</b> amostras em <b id="totalClasses">0</b> letras</div>
+                <button id="exportBtn" class="action-btn secondary">Exportar dataset.json</button>
+                <button id="importBtn" class="action-btn secondary">Importar dataset.json</button>
+                <input type="file" id="importFile" accept="application/json" style="display:none">
+                <button id="clearAllBtn" class="action-btn danger">Apagar tudo</button>
+            </div>
+            <div class="dataset-controls">
+                <div class="hint-box">
+                    <b>IA treinada (rede neural):</b> depois de gravar bastante amostra, treine uma rede neural pequena no seu próprio navegador. Na tradução ao vivo ela é usada junto com o KNN — uma letra só é confirmada quando os dois concordam, o que reduz confusão entre letras parecidas (tipo R e D).
+                </div>
+                <button id="trainMlpBtn" class="action-btn">Treinar IA (rede neural)</button>
+                <div id="mlpStatus" class="sample-count">IA ainda não treinada.</div>
+            </div>
+            <div class="status-item"><span>Mão Detectada</span><span id="handStatusCollect" class="badge inactive">Não</span></div>
+        </div>
+    </div>
+
+    <!-- ===================== ABA: GUIA ===================== -->
+    <div class="container-guide" id="tabGuide"></div>
+
+    <script>
+        // ============================================================
+        // NOTAS DE REVISÃO
+        // ------------------------------------------------------------
+        // v2: pipeline único de câmera (uma só captura/um só modelo em
+        // vez de duas), tratamento de erro real de câmera, alfabeto
+        // completo (26 letras), gravação de gestos com movimento (J/Z)
+        // por trajetória reamostrada, e uma IA treinada (rede neural)
+        // opcional como alternativa ao KNN.
+        //
+        // v3 (esta revisão) — foco em MELHORAR A LEITURA DA MÃO, tratando
+        // a câmera como um substituto dos sensores de uma luva:
+        // 1) Suavização temporal dos 21 landmarks (filtro One-Euro) antes
+        //    de qualquer cálculo — reduz tremor frame a frame sem atrasar
+        //    gestos rápidos (o filtro suaviza mais quando a mão está
+        //    parada e menos quando ela se move rápido).
+        // 2) Features geométricas novas: ângulo de flexão de cada dedo
+        //    (polegar/indicador/médio/anelar/mindinho), abertura entre
+        //    pontas de dedos vizinhas, e inclinação da mão. Ângulos entre
+        //    ossos são invariantes a posição/escala/rotação por definição
+        //    — diferente de coordenadas x/y cruas, eles não mudam se a
+        //    mão está mais longe, mais perto ou girada. Isso ajuda muito
+        //    a separar letras parecidas (ex: R x D: nos dois o indicador
+        //    fica esticado, mas no R o médio também fica esticado e no D
+        //    não — isso aparece direto no ângulo de flexão do médio,
+        //    mesmo quando os dedos se cruzam na imagem e a posição x/y
+        //    fica ambígua).
+        // 3) Eixo Z incorporado ao vetor de features (profundidade
+        //    relativa ao pulso), além de usado nos ângulos 3D.
+        // 4) Verificação de qualidade da mão (tamanho no quadro, se está
+        //    cortada na borda, confiança de handedness do MediaPipe)
+        //    ANTES de tentar classificar — se a leitura não é confiável,
+        //    o sistema avisa em vez de arriscar uma letra errada.
+        // 5) Perda momentânea da mão (1-2 frames) não reseta mais tudo na
+        //    hora — há uma folga curta (HAND_GRACE_MS) antes de zerar o
+        //    estado, evitando piscar a letra detectada à toa.
+        // 6) J/Z: em vez de comparar o vetor inteiro (agora com 74
+        //    números) a cada frame, o gesto passa a ser rastreado só
+        //    pelas pontas do indicador e do mindinho — mais leve e bem
+        //    menos sensível a tremor dos outros dedos. Também exige um
+        //    deslocamento mínimo real antes de considerar que houve gesto
+        //    (filtra tremor sendo confundido com J/Z).
+        // 7) Câmera adaptativa: resolução e complexidade do modelo do
+        //    MediaPipe mudam conforme o dispositivo (mais leve no
+        //    celular, mais nítido no computador), e o envio de frames é
+        //    limitado a ~30/s pra não gastar CPU/bateria à toa em telas
+        //    de alta taxa de atualização.
+        // 8) Formato do dataset mudou de v2 (42 features) pra v3 (74
+        //    features: x/y/z + ângulos + aberturas + inclinação). Como
+        //    isso muda a forma dos vetores salvos, datasets antigos NÃO
+        //    são convertidos automaticamente (misturar formatos quebraria
+        //    o classificador) — em vez disso, o app detecta o formato
+        //    antigo, avisa claramente e oferece baixar um backup, sem
+        //    apagar nada sozinho.
+        // ============================================================
+
+        // ============================================================
+        // CONFIGURAÇÃO GERAL
+        // ============================================================
+        const LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                          "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"];
+        const MOVEMENT_LETTERS = new Set(["J", "Z"]);
+
+        const BUFFER_SIZE = 15;
+        const CONFIRM_THRESHOLD = 10;
+        const CONFIDENCE_MIN = 0.55;
+        const K_NEIGHBORS = 7;
+        const RECORD_DURATION_MS = 3000;
+        const RECORD_INTERVAL_MS = 100;
+        const PREP_COUNTDOWN_S = 1;
+
+        const SMOOTH_MIN_CUTOFF = 1.2;
+        const SMOOTH_BETA = 0.4;
+        const SMOOTH_D_CUTOFF = 1.0;
+        const HAND_GRACE_MS = 250;
+
+        const HAND_MIN_BBOX_GOOD = 0.18;
+        const HAND_MIN_BBOX_OK = 0.12;
+        const HAND_EDGE_MARGIN = 0.02;
+        const QUALITY_MIN_TO_CLASSIFY = 35;
+
+        const DYNAMIC_WINDOW_MS = 1500;
+        const DYNAMIC_MIN_SPAN_MS = 350;
+        const DYNAMIC_TEMPLATE_LEN = 10;
+        const DYNAMIC_CHECK_INTERVAL_MS = 120;
+        const DYNAMIC_MAX_DISTANCE = 1.4;
+        const DYNAMIC_MIN_DISPLACEMENT = 0.10;
+
+        const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(navigator.userAgent);
+        const CAMERA_CONSTRAINTS = IS_MOBILE
+            ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+            : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' };
+        const HANDS_MODEL_COMPLEXITY = IS_MOBILE ? 0 : 1;
+        const MAX_FPS = 30;
+        const MIN_FRAME_INTERVAL_MS = 1000 / MAX_FPS;
+
+        // ============================================================
+        // NAVEGAÇÃO ENTRE ABAS
+        // ============================================================
+        let currentTab = 'live';
+        const videoContainer = document.getElementById('videoContainer');
+
+        function switchTab(tabId) {
+            currentTab = tabId;
+            document.getElementById('btnLive').classList.toggle('active', tabId === 'live');
+            document.getElementById('btnCollect').classList.toggle('active', tabId === 'collect');
+            document.getElementById('btnGuide').classList.toggle('active', tabId === 'guide');
+            document.getElementById('tabLive').classList.toggle('visible', tabId === 'live');
+            document.getElementById('tabCollect').classList.toggle('visible', tabId === 'collect');
+            document.getElementById('tabGuide').classList.toggle('visible', tabId === 'guide');
+
+            if (tabId === 'live') {
+                document.getElementById('tabLive').insertBefore(videoContainer, document.getElementById('tabLive').firstChild);
+            } else if (tabId === 'collect') {
+                document.getElementById('tabCollect').insertBefore(videoContainer, document.getElementById('tabCollect').firstChild);
+            }
+        }
+        switchTab('live');
+
+        // ============================================================
+        // GUIA DE SINAIS
+        // ============================================================
+        const guideData = [
+            { letter: 'A', desc: 'Mão fechada, polegar encostado na lateral do indicador.' },
+            { letter: 'B', desc: '4 dedos esticados, polegar dobrado na palma.' },
+            { letter: 'C', desc: 'Mão em formato de garra/meia-lua.' },
+            { letter: 'D', desc: 'Apenas dedo indicador para cima.' },
+            { letter: 'E', desc: 'Pontas dos dedos curvadas tocando o polegar, mão fechada.' },
+            { letter: 'F', desc: 'Indicador e polegar tocando-se, outros 3 dedos esticados.' },
+            { letter: 'G', desc: 'Indicador e polegar esticados e paralelos, mão de perfil, demais dedos fechados.' },
+            { letter: 'H', desc: 'Indicador e médio esticados e unidos, na horizontal, mão de perfil (alguns sinalizantes fazem um pequeno movimento lateral).' },
+            { letter: 'I', desc: 'Apenas mindinho para cima.' },
+            { letter: 'J', desc: 'Mindinho esticado; desenha o formato da letra J no ar, como um gancho.', movement: true },
+            { letter: 'K', desc: 'Indicador e médio esticados em V, polegar tocando a base do dedo médio.' },
+            { letter: 'L', desc: 'Polegar e indicador esticados (formato de L).' },
+            { letter: 'M', desc: 'Punho fechado, polegar sob os dedos indicador/médio/anelar.' },
+            { letter: 'N', desc: 'Punho fechado, polegar sob os dedos indicador/médio.' },
+            { letter: 'O', desc: 'Pontas de todos os dedos tocam o polegar, formando um "O".' },
+            { letter: 'P', desc: 'Parecido com o K, porém com a mão apontando para baixo.' },
+            { letter: 'Q', desc: 'Indicador e polegar esticados apontando para baixo, como um gancho.' },
+            { letter: 'R', desc: 'Indicador e médio esticados e cruzados.' },
+            { letter: 'S', desc: 'Punho cerrado, polegar cruzando por cima dos dedos.' },
+            { letter: 'T', desc: 'Punho fechado, polegar entre indicador e médio.' },
+            { letter: 'U', desc: 'Indicador e médio esticados e colados.' },
+            { letter: 'V', desc: 'Indicador e médio esticados e separados.' },
+            { letter: 'W', desc: 'Indicador, médio e anelar esticados e separados.' },
+            { letter: 'X', desc: 'Indicador dobrado em formato de gancho, demais dedos fechados.' },
+            { letter: 'Y', desc: 'Polegar e mindinho esticados, outros dedos fechados.' },
+            { letter: 'Z', desc: 'Indicador esticado; desenha o formato da letra Z no ar.', movement: true }
+        ];
+
+        const guideContainer = document.getElementById('tabGuide');
+        const guideCardsHtml = guideData.map(item => {
+            const tag = item.movement ? '<div class="movement-tag">Movimento</div>' : '';
+            return `<div class="guide-card">${tag}<div class="guide-letter">${item.letter}</div><div class="guide-desc">${item.desc}</div></div>`;
+        }).join('');
+        guideContainer.innerHTML =
+            '<p class="guide-intro">Configurações de mão de referência para o alfabeto manual em Libras. ' +
+            '<strong>Letras com movimento</strong> (marcadas abaixo) têm um pequeno deslocamento da mão — grave-as ' +
+            'na aba "Coletar Dados" com a opção "Sinal com movimento" marcada, para o reconhecimento funcionar melhor. ' +
+            'As descrições aqui são uma referência rápida de estudo; para confirmar cada configuração, consulte um ' +
+            'dicionário oficial de Libras.</p>' + guideCardsHtml;
+
+        const letterSelect = document.getElementById('letterSelect');
+        LETTERS.forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l; opt.textContent = l;
+            letterSelect.appendChild(opt);
+        });
+
+        const dynamicModeCheckbox = document.getElementById('dynamicModeCheckbox');
+
+        // ============================================================
+        // FILTRO ONE-EURO (suavização temporal, simples e leve)
+        // Algoritmo público de Casiez, Roussel & Vogel (2012), muito usado
+        // em tracking de mãos/rosto justamente por ser barato e adaptativo:
+        // suaviza bastante quando o sinal está quase parado (reduz tremor)
+        // e suaviza pouco quando o sinal se move rápido (não atrasa gestos).
+        // ============================================================
+        class OneEuroFilter {
+            constructor(minCutoff, beta, dCutoff) {
+                this.minCutoff = minCutoff;
+                this.beta = beta;
+                this.dCutoff = dCutoff;
+                this.xPrev = null;
+                this.dxPrev = 0;
+                this.tPrev = null;
+            }
+            alpha(cutoff, teSeconds) {
+                const tau = 1.0 / (2 * Math.PI * cutoff);
+                return 1.0 / (1.0 + tau / teSeconds);
+            }
+            filter(x, tMs) {
+                if (this.tPrev === null) {
+                    this.tPrev = tMs; this.xPrev = x; this.dxPrev = 0;
+                    return x;
+                }
+                const te = Math.max((tMs - this.tPrev) / 1000, 1 / 120);
+                const dx = (x - this.xPrev) / te;
+                const aD = this.alpha(this.dCutoff, te);
+                const dxHat = aD * dx + (1 - aD) * this.dxPrev;
+                const cutoff = this.minCutoff + this.beta * Math.abs(dxHat);
+                const a = this.alpha(cutoff, te);
+                const xHat = a * x + (1 - a) * this.xPrev;
+                this.xPrev = xHat; this.dxPrev = dxHat; this.tPrev = tMs;
+                return xHat;
+            }
+        }
+
+        const NUM_LANDMARKS = 21;
+        let smoothers = null;
+        function resetSmoothers() {
+            smoothers = Array.from({ length: NUM_LANDMARKS }, () => ({
+                x: new OneEuroFilter(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF),
+                y: new OneEuroFilter(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF),
+                z: new OneEuroFilter(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF)
+            }));
+        }
+        resetSmoothers();
+
+        function smoothLandmarks(rawLandmarks, tMs) {
+            return rawLandmarks.map((p, i) => ({
+                x: smoothers[i].x.filter(p.x, tMs),
+                y: smoothers[i].y.filter(p.y, tMs),
+                z: smoothers[i].z.filter(p.z || 0, tMs)
+            }));
+        }
+
+        // ============================================================
+        // GEOMETRIA DA MÃO — flexão dos dedos, abertura, inclinação
+        // (a "simulação dos sensores da luva")
+        // ============================================================
+        const LM = {
+            WRIST: 0,
+            THUMB_CMC: 1, THUMB_MCP: 2, THUMB_IP: 3, THUMB_TIP: 4,
+            INDEX_MCP: 5, INDEX_PIP: 6, INDEX_DIP: 7, INDEX_TIP: 8,
+            MIDDLE_MCP: 9, MIDDLE_PIP: 10, MIDDLE_DIP: 11, MIDDLE_TIP: 12,
+            RING_MCP: 13, RING_PIP: 14, RING_DIP: 15, RING_TIP: 16,
+            PINKY_MCP: 17, PINKY_PIP: 18, PINKY_DIP: 19, PINKY_TIP: 20
+        };
+
+        function angleDeg(a, b, c) {
+            const v1x = a.x - b.x, v1y = a.y - b.y, v1z = (a.z || 0) - (b.z || 0);
+            const v2x = c.x - b.x, v2y = c.y - b.y, v2z = (c.z || 0) - (b.z || 0);
+            const dot = v1x * v2x + v1y * v2y + v1z * v2z;
+            const m1 = Math.hypot(v1x, v1y, v1z), m2 = Math.hypot(v2x, v2y, v2z);
+            if (m1 < 1e-6 || m2 < 1e-6) return 180;
+            const cos = Math.min(1, Math.max(-1, dot / (m1 * m2)));
+            return Math.acos(cos) * 180 / Math.PI;
+        }
+        function angleToFlexion01(deg, straightDeg, curledDeg) {
+            const clamped = Math.min(straightDeg, Math.max(curledDeg, deg));
+            return (straightDeg - clamped) / (straightDeg - curledDeg);
+        }
+        function dist3(a, b) {
+            return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+        }
+
+        function computeFingerFlexion(lm) {
+            const thumbAngle = (angleDeg(lm[LM.THUMB_CMC], lm[LM.THUMB_MCP], lm[LM.THUMB_IP]) +
+                                 angleDeg(lm[LM.THUMB_MCP], lm[LM.THUMB_IP], lm[LM.THUMB_TIP])) / 2;
+            const indexAngle = (angleDeg(lm[LM.INDEX_MCP], lm[LM.INDEX_PIP], lm[LM.INDEX_DIP]) +
+                                 angleDeg(lm[LM.INDEX_PIP], lm[LM.INDEX_DIP], lm[LM.INDEX_TIP])) / 2;
+            const middleAngle = (angleDeg(lm[LM.MIDDLE_MCP], lm[LM.MIDDLE_PIP], lm[LM.MIDDLE_DIP]) +
+                                  angleDeg(lm[LM.MIDDLE_PIP], lm[LM.MIDDLE_DIP], lm[LM.MIDDLE_TIP])) / 2;
+            const ringAngle = (angleDeg(lm[LM.RING_MCP], lm[LM.RING_PIP], lm[LM.RING_DIP]) +
+                                angleDeg(lm[LM.RING_PIP], lm[LM.RING_DIP], lm[LM.RING_TIP])) / 2;
+            const pinkyAngle = (angleDeg(lm[LM.PINKY_MCP], lm[LM.PINKY_PIP], lm[LM.PINKY_DIP]) +
+                                 angleDeg(lm[LM.PINKY_PIP], lm[LM.PINKY_DIP], lm[LM.PINKY_TIP])) / 2;
+            return {
+                thumb: angleToFlexion01(thumbAngle, 165, 50),
+                index: angleToFlexion01(indexAngle, 175, 45),
+                middle: angleToFlexion01(middleAngle, 175, 45),
+                ring: angleToFlexion01(ringAngle, 175, 45),
+                pinky: angleToFlexion01(pinkyAngle, 175, 45)
+            };
+        }
+
+        function computeInclinationRad(lm) {
+            const wrist = lm[LM.WRIST], midMcp = lm[LM.MIDDLE_MCP];
+            return Math.atan2(midMcp.x - wrist.x, -(midMcp.y - wrist.y));
+        }
+
+        function analyzeHand(smoothedLandmarks, handednessLabel) {
+            const pts = smoothedLandmarks;
+            const flexion = computeFingerFlexion(pts);
+            const inclinationRad = computeInclinationRad(pts);
+            const inclinationDeg = inclinationRad * 180 / Math.PI;
+
+            const wrist = pts[LM.WRIST];
+            let handScale = dist3(wrist, pts[LM.MIDDLE_MCP]);
+            if (handScale < 1e-6) handScale = 1e-6;
+
+            const spread = {
+                thumbIndex: dist3(pts[LM.THUMB_TIP], pts[LM.INDEX_TIP]) / handScale,
+                indexMiddle: dist3(pts[LM.INDEX_TIP], pts[LM.MIDDLE_TIP]) / handScale,
+                middleRing: dist3(pts[LM.MIDDLE_TIP], pts[LM.RING_TIP]) / handScale,
+                ringPinky: dist3(pts[LM.RING_TIP], pts[LM.PINKY_TIP]) / handScale
+            };
+
+            let norm = pts.map(p => ({ x: p.x - wrist.x, y: p.y - wrist.y, z: p.z - wrist.z }));
+            const cosA = Math.cos(-inclinationRad), sinA = Math.sin(-inclinationRad);
+            norm = norm.map(p => ({ x: p.x * cosA - p.y * sinA, y: p.x * sinA + p.y * cosA, z: p.z }));
+            norm = norm.map(p => ({ x: p.x / handScale, y: p.y / handScale, z: p.z / handScale }));
+            if (handednessLabel === 'Left') {
+                norm = norm.map(p => ({ x: -p.x, y: p.y, z: p.z }));
+            }
+
+            const vector = [];
+            norm.forEach(p => { vector.push(p.x, p.y, p.z); });
+            vector.push(flexion.thumb, flexion.index, flexion.middle, flexion.ring, flexion.pinky);
+            vector.push(spread.thumbIndex, spread.indexMiddle, spread.middleRing, spread.ringPinky);
+            vector.push(Math.sin(inclinationRad), Math.cos(inclinationRad));
+
+            return { vector, points: norm, flexion, spread, inclinationDeg };
+        }
+        const FEATURE_VECTOR_LENGTH = 74;
+
+        function extractMotionPoint(normPoints) {
+            return [normPoints[LM.INDEX_TIP].x, normPoints[LM.INDEX_TIP].y,
+                     normPoints[LM.PINKY_TIP].x, normPoints[LM.PINKY_TIP].y];
+        }
+
+        // ============================================================
+        // QUALIDADE DA LEITURA DA MÃO
+        // ============================================================
+        function assessHandQuality(rawLandmarks, handednessScore) {
+            const xs = rawLandmarks.map(p => p.x), ys = rawLandmarks.map(p => p.y);
+            const minX = Math.min(...xs), maxX = Math.max(...xs);
+            const minY = Math.min(...ys), maxY = Math.max(...ys);
+            const bbox = Math.max(maxX - minX, maxY - minY);
+            const nearEdge = minX < HAND_EDGE_MARGIN || maxX > 1 - HAND_EDGE_MARGIN ||
+                              minY < HAND_EDGE_MARGIN || maxY > 1 - HAND_EDGE_MARGIN;
+
+            let score = 100;
+            if (bbox < HAND_MIN_BBOX_OK) score -= 55;
+            else if (bbox < HAND_MIN_BBOX_GOOD) score -= 22;
+            if (nearEdge) score -= 30;
+            if (typeof handednessScore === 'number') score -= (1 - handednessScore) * 35;
+            score = Math.max(0, Math.min(100, Math.round(score)));
+
+            let label = 'Baixa';
+            if (score >= 70) label = 'Boa';
+            else if (score >= 40) label = 'Média';
+
+            return { score, label, tooSmall: bbox < HAND_MIN_BBOX_OK, nearEdge };
+        }
+
+        // ============================================================
+        // RECONHECIMENTO DE GESTOS COM MOVIMENTO (J, Z, ...)
+        // ============================================================
+        function euclideanDistance(a, b) {
+            let sum = 0;
+            for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; sum += d * d; }
+            return Math.sqrt(sum);
+        }
+        function pathLength(buffer) {
+            let total = 0;
+            for (let i = 1; i < buffer.length; i++) total += euclideanDistance(buffer[i].feats, buffer[i - 1].feats);
+            return total;
+        }
+        function trimStaticEdges(buffer, moveThreshold = 0.03) {
+            if (buffer.length < 3) return buffer;
+            let startIdx = 0, endIdx = buffer.length - 1;
+            for (let i = 1; i < buffer.length; i++) {
+                if (euclideanDistance(buffer[i].feats, buffer[0].feats) > moveThreshold) { startIdx = Math.max(0, i - 1); break; }
+            }
+            for (let i = buffer.length - 2; i >= 0; i--) {
+                if (euclideanDistance(buffer[i].feats, buffer[buffer.length - 1].feats) > moveThreshold) { endIdx = Math.min(buffer.length - 1, i + 1); break; }
+            }
+            if (endIdx - startIdx < 1) return buffer;
+            return buffer.slice(startIdx, endIdx + 1);
+        }
+        function resampleToTemplate(buffer, len) {
+            if (!buffer || buffer.length < 2) return null;
+            const t0 = buffer[0].t, t1 = buffer[buffer.length - 1].t;
+            const span = t1 - t0;
+            if (span <= 0) return null;
+            const out = [];
+            for (let i = 0; i < len; i++) {
+                const targetT = t0 + (i / (len - 1)) * span;
+                let j = 0;
+                while (j < buffer.length - 1 && buffer[j + 1].t < targetT) j++;
+                const a = buffer[j], b = buffer[Math.min(j + 1, buffer.length - 1)];
+                const localFrac = (b.t === a.t) ? 0 : (targetT - a.t) / (b.t - a.t);
+                for (let k = 0; k < a.feats.length; k++) out.push(a.feats[k] + (b.feats[k] - a.feats[k]) * localFrac);
+            }
+            return out;
+        }
+        function buildDynamicTemplate(buffer) {
+            const trimmed = trimStaticEdges(buffer);
+            const source = trimmed.length >= 2 ? trimmed : buffer;
+            return resampleToTemplate(source, DYNAMIC_TEMPLATE_LEN);
+        }
+        function matchDynamicTemplates(buffer, templates) {
+            if (!buffer || buffer.length < 2) return null;
+            const span = buffer[buffer.length - 1].t - buffer[0].t;
+            if (span < DYNAMIC_MIN_SPAN_MS) return null;
+            if (pathLength(buffer) < DYNAMIC_MIN_DISPLACEMENT) return null;
+
+            const sample = buildDynamicTemplate(buffer);
+            if (!sample) return null;
+            let best = null;
+            for (const letter of Object.keys(templates)) {
+                for (const tmpl of templates[letter]) {
+                    const d = euclideanDistance(sample, tmpl);
+                    if (!best || d < best.distance) best = { letter, distance: d };
+                }
+            }
+            if (best && best.distance <= DYNAMIC_MAX_DISTANCE) return best;
+            return null;
+        }
+
+        // ============================================================
+        // CLASSIFICADOR KNN + IA (rede neural) + templates de movimento
+        // ============================================================
+        const classifier = knnClassifier.create();
+        let dynamicTemplates = {};
+
+        const STORAGE_KEY = 'libras_dataset_v3';
+        const LEGACY_KEYS = ['libras_dataset_v2', 'libras_dataset_v1'];
+
+        function datasetToPlainObject() {
+            const dataset = classifier.getClassifierDataset();
+            const obj = {};
+            Object.keys(dataset).forEach(label => {
+                obj[label] = { data: dataset[label].arraySync(), shape: dataset[label].shape };
+            });
+            return obj;
+        }
+        function loadDatasetFromPlainObject(obj) {
+            const tensorObj = {};
+            Object.keys(obj).forEach(label => {
+                tensorObj[label] = tf.tensor(obj[label].data, obj[label].shape, 'float32');
+            });
+            classifier.setClassifierDataset(tensorObj);
+        }
+
+        let mlpModel = null;
+        let mlpClasses = [];
+        let mlpTrained = false;
+        let mlpDirty = false;
+        const MLP_MIN_EXAMPLES_PER_CLASS = 8;
+        const MLP_MIN_CLASSES = 2;
+
+        function arrayBufferToBase64(buffer) {
+            let binary = '';
+            const bytes = new Uint8Array(buffer);
+            for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+            return btoa(binary);
+        }
+        function base64ToArrayBuffer(base64) {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            return bytes.buffer;
+        }
+
+        function updateMlpUI() {
+            const mlpStatus = document.getElementById('mlpStatus');
+            if (!mlpTrained) mlpStatus.textContent = 'IA ainda não treinada.';
+            else if (mlpDirty) mlpStatus.textContent = `IA treinada em ${mlpClasses.length} letras, mas o dataset mudou desde então — treine de novo pra ela voltar a ser usada na verificação dupla.`;
+            else mlpStatus.textContent = `IA treinada e atualizada (${mlpClasses.length} letras) — sendo usada junto com o KNN.`;
+        }
+
+        function disposeMlpModel() {
+            if (mlpModel) { mlpModel.dispose(); mlpModel = null; }
+            mlpClasses = [];
+            mlpTrained = false;
+            mlpDirty = false;
+        }
+
+        async function trainMlpModel() {
+            const counts = classifier.getClassExampleCount();
+            const classes = Object.keys(counts).filter(l => counts[l] >= MLP_MIN_EXAMPLES_PER_CLASS).sort();
+            if (classes.length < MLP_MIN_CLASSES) {
+                alert(`Grave pelo menos ${MLP_MIN_EXAMPLES_PER_CLASS} amostras estáticas de, no mínimo, ${MLP_MIN_CLASSES} letras diferentes antes de treinar a IA. (Hoje: ${classes.length} letra(s) com amostras suficientes.)`);
+                return;
+            }
+            const trainBtn = document.getElementById('trainMlpBtn');
+            const mlpStatus = document.getElementById('mlpStatus');
+            trainBtn.disabled = true;
+
+            const plain = datasetToPlainObject();
+            const xs = [], ys = [];
+            classes.forEach((label, classIdx) => {
+                const entry = plain[label];
+                const [n] = entry.shape;
+                for (let i = 0; i < n; i++) { xs.push(entry.data[i]); ys.push(classIdx); }
+            });
+
+            disposeMlpModel();
+            mlpClasses = classes;
+
+            const inputDim = xs[0].length;
+            const model = tf.sequential();
+            model.add(tf.layers.dense({ units: 64, activation: 'relu', inputShape: [inputDim] }));
+            model.add(tf.layers.dropout({ rate: 0.2 }));
+            model.add(tf.layers.dense({ units: 32, activation: 'relu' }));
+            model.add(tf.layers.dense({ units: classes.length, activation: 'softmax' }));
+            model.compile({ optimizer: tf.train.adam(0.01), loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+
+            const xsTensor = tf.tensor2d(xs);
+            const ysTensor = tf.oneHot(tf.tensor1d(ys, 'int32'), classes.length);
+
+            try {
+                await model.fit(xsTensor, ysTensor, {
+                    epochs: 40, batchSize: 16, shuffle: true,
+                    callbacks: {
+                        onEpochEnd: (epoch, logs) => {
+                            const acc = (logs.acc !== undefined ? logs.acc : logs.accuracy) || 0;
+                            mlpStatus.textContent = `Treinando... época ${epoch + 1}/40 — acurácia no treino: ${(acc * 100).toFixed(1)}%`;
+                        }
+                    }
+                });
+                mlpModel = model;
+                mlpTrained = true;
+                mlpDirty = false;
+                updateMlpUI();
+                saveToLocalStorage();
+            } catch (e) {
+                console.error('Erro ao treinar a IA:', e);
+                alert('Não foi possível treinar a IA. Veja o console para detalhes.');
+                disposeMlpModel();
+                updateMlpUI();
+            } finally {
+                xsTensor.dispose();
+                ysTensor.dispose();
+                trainBtn.disabled = false;
+            }
+        }
+
+        function predictWithMlp(feats) {
+            if (!mlpModel) return null;
+            return tf.tidy(() => {
+                const input = tf.tensor2d([feats]);
+                const output = mlpModel.predict(input);
+                const probs = output.dataSync();
+                let best = 0;
+                for (let i = 1; i < probs.length; i++) if (probs[i] > probs[best]) best = i;
+                return { label: mlpClasses[best], confidence: probs[best] };
+            });
+        }
+
+        async function serializeMlpModel() {
+            if (!mlpModel || mlpDirty) return null;
+            let artifacts = null;
+            await mlpModel.save(tf.io.withSaveHandler(async (a) => { artifacts = a; return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: 'JSON' } }; }));
+            return {
+                modelTopology: artifacts.modelTopology,
+                weightSpecs: artifacts.weightSpecs,
+                weightDataBase64: arrayBufferToBase64(artifacts.weightData),
+                classes: mlpClasses
+            };
+        }
+        async function loadMlpModel(serialized) {
+            disposeMlpModel();
+            if (!serialized) { updateMlpUI(); return; }
+            try {
+                const model = await tf.loadLayersModel(tf.io.fromMemory({
+                    modelTopology: serialized.modelTopology,
+                    weightSpecs: serialized.weightSpecs,
+                    weightData: base64ToArrayBuffer(serialized.weightDataBase64)
+                }));
+                mlpModel = model;
+                mlpClasses = serialized.classes || [];
+                mlpTrained = true;
+                mlpDirty = false;
+            } catch (e) {
+                console.error('Não foi possível carregar a IA treinada do dataset:', e);
+                disposeMlpModel();
+            }
+            updateMlpUI();
+        }
+        function markMlpDirty() {
+            if (mlpTrained && !mlpDirty) { mlpDirty = true; updateMlpUI(); }
+        }
+
+        async function datasetToExportObject() {
+            return {
+                version: 3,
+                featureLength: FEATURE_VECTOR_LENGTH,
+                static: datasetToPlainObject(),
+                dynamic: dynamicTemplates,
+                model: await serializeMlpModel()
+            };
+        }
+
+        async function loadDatasetFromExportObject(obj) {
+            if (!obj) return { ok: false, reason: 'empty' };
+            if (obj.version === 3 && obj.static) {
+                loadDatasetFromPlainObject(obj.static);
+                dynamicTemplates = obj.dynamic || {};
+                await loadMlpModel(obj.model || null);
+                return { ok: true };
+            }
+            return { ok: false, reason: 'incompatible-version', foundVersion: obj.version || 1 };
+        }
+
+        function showLegacyDatasetWarning(rawText, sourceLabel) {
+            const banner = document.getElementById('legacyWarningBanner');
+            banner.style.display = 'flex';
+            document.getElementById('legacyWarningText').textContent =
+                `Encontramos um dataset em formato antigo ${sourceLabel}. Nesta atualização, o jeito de calcular as características da mão mudou (agora inclui ângulos dos dedos e profundidade), então as amostras antigas não são compatíveis com o novo reconhecimento — não é possível migrar automaticamente sem perder precisão. Seus dados antigos NÃO foram apagados, só não estão sendo usados. Baixe o backup se quiser guardá-los, mas será preciso regravar as amostras no formato novo.`;
+            document.getElementById('downloadLegacyBtn').onclick = () => {
+                const blob = new Blob([rawText], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'dataset_backup_formato_antigo.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+        }
+        document.getElementById('dismissLegacyBtn').addEventListener('click', () => {
+            document.getElementById('legacyWarningBanner').style.display = 'none';
+        });
+
+        async function saveToLocalStorage() {
+            try {
+                const obj = await datasetToExportObject();
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+            } catch (e) {
+                console.error('Não foi possível salvar no localStorage:', e);
+            }
+        }
+
+        async function loadFromLocalStorage() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    const result = await loadDatasetFromExportObject(JSON.parse(raw));
+                    return result.ok;
+                }
+                for (const key of LEGACY_KEYS) {
+                    const oldRaw = localStorage.getItem(key);
+                    if (oldRaw) { showLegacyDatasetWarning(oldRaw, 'salvo no seu navegador'); break; }
+                }
+                return false;
+            } catch (e) {
+                console.error('Não foi possível carregar do localStorage:', e);
+                return false;
+            }
+        }
+
+        async function tryLoadBundledDataset() {
+            try {
+                const resp = await fetch('dataset.json');
+                if (!resp.ok) return false;
+                const text = await resp.text();
+                const obj = JSON.parse(text);
+                const result = await loadDatasetFromExportObject(obj);
+                if (!result.ok && result.reason === 'incompatible-version') {
+                    showLegacyDatasetWarning(text, 'publicado no dataset.json deste site');
+                }
+                return result.ok;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // ============================================================
+        // STATUS DO DATASET / AVISO POR LETRA
+        // ============================================================
+        function computeLetterDataStatus() {
+            const counts = classifier.getClassExampleCount();
+            const missing = [], low = [];
+            LETTERS.forEach(l => {
+                const isMovement = MOVEMENT_LETTERS.has(l);
+                const total = isMovement ? (dynamicTemplates[l] || []).length : (counts[l] || 0);
+                if (total === 0) missing.push(l);
+                else if (!isMovement && total < MLP_MIN_EXAMPLES_PER_CLASS) low.push(l);
+            });
+            return { missing, low };
+        }
+
+        function updateNoDataHint() {
+            const hint = document.getElementById('noDataHint');
+            const { missing, low } = computeLetterDataStatus();
+            if (missing.length === LETTERS.length) {
+                hint.style.display = 'block';
+                hint.className = 'hint-box';
+                hint.innerHTML = 'Ainda não há dados de treino. Vá na aba <b>Coletar Dados</b> e grave alguns exemplos de cada letra antes de usar a tradução ao vivo.';
+            } else if (missing.length > 0 || low.length > 0) {
+                hint.style.display = 'block';
+                hint.className = 'hint-box warn';
+                let html = '';
+                if (missing.length) html += `<div>Sem nenhuma amostra: <b>${missing.join(', ')}</b></div>`;
+                if (low.length) html += `<div style="margin-top:6px;">Poucas amostras (recomendado ${MLP_MIN_EXAMPLES_PER_CLASS}+): <b>${low.join(', ')}</b></div>`;
+                hint.innerHTML = html;
+            } else {
+                hint.style.display = 'none';
+            }
+        }
+
+        function updateDatasetUI() {
+            const counts = classifier.getClassExampleCount();
+            const currentLetter = letterSelect.value;
+            const staticTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+            const dynamicTotalForLetter = (dynamicTemplates[currentLetter] || []).length;
+            const dynamicGrandTotal = Object.values(dynamicTemplates).reduce((a, arr) => a + arr.length, 0);
+            const lettersWithData = new Set([
+                ...Object.keys(counts).filter(k => counts[k] > 0),
+                ...Object.keys(dynamicTemplates).filter(k => dynamicTemplates[k].length > 0)
+            ]);
+            document.getElementById('letterCount').textContent = `${counts[currentLetter] || 0} estáticas + ${dynamicTotalForLetter} com movimento`;
+            document.getElementById('totalCount').textContent = staticTotal + dynamicGrandTotal;
+            document.getElementById('totalClasses').textContent = lettersWithData.size;
+            updateNoDataHint();
+        }
+
+        letterSelect.addEventListener('change', () => {
+            dynamicModeCheckbox.checked = MOVEMENT_LETTERS.has(letterSelect.value);
+            updateDatasetUI();
+        });
+
+        document.getElementById('clearLetterBtn').addEventListener('click', () => {
+            const letter = letterSelect.value;
+            let changed = false;
+            if (classifier.getClassExampleCount()[letter]) { classifier.clearClass(letter); changed = true; }
+            if (dynamicTemplates[letter] && dynamicTemplates[letter].length) { delete dynamicTemplates[letter]; changed = true; }
+            if (changed) { markMlpDirty(); saveToLocalStorage(); updateDatasetUI(); }
+        });
+
+        document.getElementById('clearAllBtn').addEventListener('click', () => {
+            if (confirm('Apagar TODAS as amostras gravadas (estáticas e com movimento)? Essa ação não pode ser desfeita.')) {
+                classifier.clearAllClasses();
+                dynamicTemplates = {};
+                disposeMlpModel();
+                updateMlpUI();
+                saveToLocalStorage();
+                updateDatasetUI();
+            }
+        });
+
+        document.getElementById('trainMlpBtn').addEventListener('click', () => { trainMlpModel(); });
+
+        document.getElementById('exportBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('exportBtn');
+            btn.disabled = true;
+            try {
+                const obj = await datasetToExportObject();
+                const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'dataset.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('importFile').click();
+        });
+
+        document.getElementById('importFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const result = await loadDatasetFromExportObject(JSON.parse(text));
+                if (!result.ok) {
+                    if (result.reason === 'incompatible-version') {
+                        alert('Esse dataset.json está em formato antigo (incompatível com a versão atual do reconhecimento). Use o botão "Baixar backup antigo" se precisar dele, mas será preciso regravar as amostras.');
+                        showLegacyDatasetWarning(text, 'importado de um arquivo');
+                    } else {
+                        alert('Não consegui ler esse arquivo como dataset.json válido.');
+                    }
+                } else {
+                    await saveToLocalStorage();
+                    updateDatasetUI();
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Não consegui ler esse arquivo como dataset.json válido.');
+            }
+            e.target.value = '';
+        });
+
+        // ============================================================
+        // GRAVAÇÃO (aba Coletar Dados)
+        // ============================================================
+        let recording = false;
+        let countingDown = false;
+        let recordTimer = null;
+        let recordEndTime = 0;
+        let collectDynamicBuffer = [];
+
+        document.getElementById('recordBtn').addEventListener('click', () => {
+            if (recording || countingDown) return;
+            const btn = document.getElementById('recordBtn');
+            btn.disabled = true;
+            let prep = PREP_COUNTDOWN_S;
+            countingDown = true;
+            btn.textContent = `Prepare-se... ${prep}`;
+            const prepTimer = setInterval(() => {
+                prep -= 1;
+                if (prep <= 0) { clearInterval(prepTimer); countingDown = false; beginRecording(); }
+                else { btn.textContent = `Prepare-se... ${prep}`; }
+            }, 1000);
+        });
+
+        function beginRecording() {
+            recording = true;
+            collectDynamicBuffer = [];
+            recordEndTime = performance.now() + RECORD_DURATION_MS;
+            const btn = document.getElementById('recordBtn');
+            recordTimer = setInterval(() => {
+                const remaining = Math.max(0, recordEndTime - performance.now());
+                btn.textContent = `Gravando... ${(remaining / 1000).toFixed(1)}s`;
+                if (remaining <= 0) {
+                    clearInterval(recordTimer);
+                    recording = false;
+                    finalizeRecording();
+                    btn.disabled = false;
+                    btn.textContent = 'Gravar 3s';
+                }
+            }, RECORD_INTERVAL_MS);
+        }
+
+        function finalizeRecording() {
+            if (dynamicModeCheckbox.checked) {
+                const trimmed = trimStaticEdges(collectDynamicBuffer);
+                const source = trimmed.length >= 2 ? trimmed : collectDynamicBuffer;
+                if (pathLength(source) < DYNAMIC_MIN_DISPLACEMENT) {
+                    alert('Quase! Não detectei movimento suficiente. Faça o gesto de forma mais nítida durante os 3 segundos e tente de novo.');
+                } else {
+                    const tmpl = buildDynamicTemplate(collectDynamicBuffer);
+                    if (tmpl) {
+                        const letter = letterSelect.value;
+                        if (!dynamicTemplates[letter]) dynamicTemplates[letter] = [];
+                        dynamicTemplates[letter].push(tmpl);
+                    } else {
+                        alert('Não deu para capturar o movimento dessa vez. Tente de novo.');
+                    }
+                }
+            }
+            collectDynamicBuffer = [];
+            markMlpDirty();
+            saveToLocalStorage();
+            updateDatasetUI();
+        }
+
+        // ============================================================
+        // MEDIAPIPE HANDS — pipeline único, compartilhado entre as abas
+        // ============================================================
+        const mpHands = window.Hands;
+        const mpDrawing = { drawConnectors: window.drawConnectors, drawLandmarks: window.drawLandmarks };
+
+        const videoEl = document.getElementById('videoShared');
+        const canvasEl = document.getElementById('canvasShared');
+        const ctx = canvasEl.getContext('2d');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingMessageEl = document.getElementById('loadingMessage');
+        const retryBtn = document.getElementById('retryBtn');
+
+        function showLoading(msg) { loadingOverlay.style.display = 'flex'; loadingMessageEl.textContent = msg; retryBtn.style.display = 'none'; }
+        function showError(msg) { loadingOverlay.style.display = 'flex'; loadingMessageEl.textContent = msg; retryBtn.style.display = 'inline-block'; }
+        function hideOverlay() { loadingOverlay.style.display = 'none'; }
+
+        let hands = null;
+        let currentStream = null;
+        let firstResultReceived = false;
+        let readinessTimeoutId = null;
+        let pipelineFrameHandle = null;
+        let lastFrameSentAt = 0;
+
+        let lastHandSeenAt = 0;
+        let lastRawLandmarks = null;
+        let lastHandedness = null;
+        let lastHandednessScore = 1;
+
+        function cameraErrorMessage(err) {
+            switch (err && err.name) {
+                case 'NotAllowedError':
+                case 'PermissionDeniedError':
+                    return 'Permissão da câmera negada. Habilite o acesso à câmera para este site nas configurações do navegador e clique em "Tentar novamente".';
+                case 'NotFoundError':
+                case 'DevicesNotFoundError':
+                    return 'Nenhuma câmera foi encontrada neste dispositivo.';
+                case 'NotReadableError':
+                case 'TrackStartError':
+                    return 'A câmera parece estar em uso por outro aplicativo ou aba. Feche-o e tente novamente.';
+                case 'OverconstrainedError':
+                    return 'Não foi possível configurar a câmera com a resolução solicitada. Tente novamente.';
+                default:
+                    return `Ocorreu um erro ao acessar a câmera${err && err.message ? ': ' + err.message : ''}. Tente novamente.`;
+            }
+        }
+
+        async function startPipeline() {
+            firstResultReceived = false;
+            if (readinessTimeoutId) clearTimeout(readinessTimeoutId);
+            if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+
+            showLoading('Solicitando acesso à câmera...');
+
+            if (!window.isSecureContext) {
+                showError('A câmera só funciona em conexões seguras (HTTPS) ou em localhost. Publique esta página em um serviço com HTTPS, como GitHub Pages, Netlify ou Vercel, e abra por esse endereço (não pelo arquivo local).');
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showError('Este navegador não tem suporte a acesso de câmera (getUserMedia). Tente um navegador atualizado, como Chrome, Edge ou Firefox.');
+                return;
+            }
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia({ video: CAMERA_CONSTRAINTS, audio: false });
+            } catch (err) {
+                showError(cameraErrorMessage(err));
+                return;
+            }
+
+            videoEl.srcObject = currentStream;
+            try { await videoEl.play(); } catch (e) { /* autoplay mudo costuma ser permitido; ignora se falhar aqui */ }
+
+            showLoading('Carregando modelo de reconhecimento de mãos...');
+
+            hands = new mpHands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ maxNumHands: 1, modelComplexity: HANDS_MODEL_COMPLEXITY, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+            hands.onResults(onHandsResults);
+
+            try {
+                if (typeof hands.initialize === 'function') await hands.initialize();
+            } catch (e) {
+                console.warn('hands.initialize() falhou, seguindo mesmo assim:', e);
+            }
+
+            readinessTimeoutId = setTimeout(() => {
+                if (!firstResultReceived) {
+                    showError('Não foi possível carregar o modelo de reconhecimento (demorou demais). Verifique sua conexão com a internet e tente novamente.');
+                }
+            }, 15000);
+
+            resetSmoothers();
+            lastRawLandmarks = null;
+            runFrameLoop();
+        }
+
+        function runFrameLoop() {
+            if (pipelineFrameHandle) cancelAnimationFrame(pipelineFrameHandle);
+            function loop() {
+                pipelineFrameHandle = requestAnimationFrame(loop);
+                if (currentTab === 'guide') return;
+                const now = performance.now();
+                if (now - lastFrameSentAt < MIN_FRAME_INTERVAL_MS) return;
+                if (videoEl.readyState >= 2 && hands) {
+                    lastFrameSentAt = now;
+                    hands.send({ image: videoEl }).catch(err => console.error('Erro ao processar frame:', err));
+                }
+            }
+            loop();
+        }
+
+        function onHandsResults(results) {
+            if (!firstResultReceived) {
+                firstResultReceived = true;
+                if (readinessTimeoutId) clearTimeout(readinessTimeoutId);
+                hideOverlay();
+            }
+
+            canvasEl.width = videoEl.videoWidth;
+            canvasEl.height = videoEl.videoHeight;
+            ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+            const now = performance.now();
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                document.getElementById('handStatusLive').className = 'badge active';
+                document.getElementById('handStatusLive').textContent = 'Sim';
+                document.getElementById('handStatusCollect').className = 'badge active';
+                document.getElementById('handStatusCollect').textContent = 'Sim';
+
+                const rawLm = results.multiHandLandmarks[0];
+                const handedness = results.multiHandedness[0].label;
+                const handednessScore = results.multiHandedness[0].score;
+
+                lastHandSeenAt = now;
+                lastRawLandmarks = rawLm;
+                lastHandedness = handedness;
+                lastHandednessScore = handednessScore;
+
+                const smoothed = smoothLandmarks(rawLm, now);
+                mpDrawing.drawConnectors(ctx, smoothed, window.HAND_CONNECTIONS, { color: '#ffffff', lineWidth: 2 });
+                mpDrawing.drawLandmarks(ctx, smoothed, { color: '#3b82f6', lineWidth: 1, radius: 3 });
+
+                const quality = assessHandQuality(rawLm, handednessScore);
+                dispatchLandmarks(smoothed, handedness, now, quality);
+            } else {
+                document.getElementById('handStatusLive').className = 'badge inactive';
+                document.getElementById('handStatusLive').textContent = 'Não';
+                document.getElementById('handStatusCollect').className = 'badge inactive';
+                document.getElementById('handStatusCollect').textContent = 'Não';
+                handleHandLost(now);
+            }
+        }
+
+        function handleHandLost(now) {
+            if (lastRawLandmarks && (now - lastHandSeenAt) <= HAND_GRACE_MS) {
+                const smoothed = smoothLandmarks(lastRawLandmarks, now);
+                const quality = assessHandQuality(lastRawLandmarks, lastHandednessScore);
+                quality.score = Math.max(0, quality.score - 15);
+                if (quality.score < 40) quality.label = 'Baixa'; else if (quality.score < 70) quality.label = 'Média';
+                dispatchLandmarks(smoothed, lastHandedness, now, quality);
+            } else {
+                resetSmoothers();
+                lastRawLandmarks = null;
+                dynamicLiveBuffer = [];
+                dispatchLandmarks(null, null, now, null);
+            }
+        }
+
+        function dispatchLandmarks(smoothedLm, handedness, tMs, quality) {
+            if (currentTab === 'live') {
+                handleLiveLandmarks(smoothedLm, handedness, tMs, quality);
+            } else if (currentTab === 'collect') {
+                handleCollectLandmarks(smoothedLm, handedness, tMs, quality);
+            }
+        }
+
+        retryBtn.addEventListener('click', () => { startPipeline(); });
+
+        // --- Pipeline da aba "Ao Vivo" ---
+        let liveBuffer = [];
+        let lastSpoken = null;
+        let audioEnabled = false;
+        const synth = window.speechSynthesis;
+
+        document.getElementById('startAudioBtn').addEventListener('click', (e) => {
+            audioEnabled = true;
+            e.target.style.display = 'none';
+            synth.speak(new SpeechSynthesisUtterance(''));
+        });
+
+        function confirmLetter(letter) {
+            const resultLetter = document.getElementById('resultLetter');
+            if (resultLetter.textContent !== letter) {
+                resultLetter.textContent = letter;
+                if (audioEnabled && synth && letter !== lastSpoken) {
+                    lastSpoken = letter;
+                    const u = new SpeechSynthesisUtterance(letter);
+                    u.lang = 'pt-BR';
+                    synth.speak(u);
+                }
+            }
+        }
+
+        function resetSensorUI() {
+            ['sensorThumb', 'sensorIndex', 'sensorMiddle', 'sensorRing', 'sensorPinky'].forEach(id => {
+                document.getElementById(id).style.width = '0%';
+            });
+            ['sensorThumbPct', 'sensorIndexPct', 'sensorMiddlePct', 'sensorRingPct', 'sensorPinkyPct'].forEach(id => {
+                document.getElementById(id).textContent = '—';
+            });
+            document.getElementById('sensorIncl').textContent = '—';
+            document.getElementById('qualityBadge').textContent = 'Qualidade: —';
+            document.getElementById('qualityBadge').className = 'badge inactive';
+        }
+
+        function updateSensorUI(analysis, quality) {
+            const map = { thumb: 'sensorThumb', index: 'sensorIndex', middle: 'sensorMiddle', ring: 'sensorRing', pinky: 'sensorPinky' };
+            Object.keys(map).forEach(finger => {
+                const pct = Math.round(analysis.flexion[finger] * 100);
+                document.getElementById(map[finger]).style.width = pct + '%';
+                document.getElementById(map[finger] + 'Pct').textContent = pct + '%';
+            });
+            document.getElementById('sensorIncl').textContent = `${analysis.inclinationDeg.toFixed(0)}°`;
+            if (quality) {
+                document.getElementById('qualityBadge').textContent = `Qualidade: ${quality.label}`;
+                document.getElementById('qualityBadge').className = 'badge ' +
+                    (quality.label === 'Boa' ? 'active' : quality.label === 'Média' ? 'warning-badge' : 'inactive');
+            }
+        }
+
+        let dynamicLiveBuffer = [];
+        let lastDynamicCheck = 0;
+
+        async function handleLiveLandmarks(lm, handedness, tMs, quality) {
+            const stabilityBar = document.getElementById('stabilityBar');
+            const resultLetter = document.getElementById('resultLetter');
+            const qualityMessage = document.getElementById('qualityMessage');
+            const verificationHint = document.getElementById('verificationHint');
+
+            if (!lm) {
+                dynamicLiveBuffer = [];
+                resetSensorUI();
+                qualityMessage.style.display = 'none';
+                liveBuffer.push(null);
+                if (liveBuffer.length > BUFFER_SIZE) liveBuffer.shift();
+                const hasAny = liveBuffer.some(l => l);
+                if (!hasAny) { resultLetter.textContent = '-'; stabilityBar.style.width = '0%'; lastSpoken = null; }
+                return;
+            }
+
+            const analysis = analyzeHand(lm, handedness);
+            updateSensorUI(analysis, quality);
+
+            const motionPoint = extractMotionPoint(analysis.points);
+            dynamicLiveBuffer.push({ t: tMs, feats: motionPoint });
+            dynamicLiveBuffer = dynamicLiveBuffer.filter(p => tMs - p.t <= DYNAMIC_WINDOW_MS);
+
+            const hasDynamicTemplates = Object.keys(dynamicTemplates).length > 0;
+            if (hasDynamicTemplates && tMs - lastDynamicCheck >= DYNAMIC_CHECK_INTERVAL_MS) {
+                lastDynamicCheck = tMs;
+                const dynMatch = matchDynamicTemplates(dynamicLiveBuffer, dynamicTemplates);
+                if (dynMatch) {
+                    qualityMessage.style.display = 'none';
+                    confirmLetter(dynMatch.letter);
+                    stabilityBar.style.width = '100%';
+                    stabilityBar.style.background = 'var(--success)';
+                    dynamicLiveBuffer = [];
+                    return;
+                }
+            }
+
+            if (quality && quality.score < QUALITY_MIN_TO_CLASSIFY) {
+                qualityMessage.style.display = 'block';
+                qualityMessage.textContent = quality.nearEdge
+                    ? 'Mão não suficientemente visível (parece estar cortada na borda da câmera).'
+                    : 'Mão não suficientemente visível (aproxime a mão e centralize na câmera).';
+                resultLetter.textContent = '-';
+                stabilityBar.style.width = '0%';
+                liveBuffer = [];
+                lastSpoken = null;
+                return;
+            }
+            qualityMessage.style.display = 'none';
+
+            let detectedLetter = null;
+            const totalExamples = Object.values(classifier.getClassExampleCount()).reduce((a, b) => a + b, 0);
+            let knnResult = null, mlpResult = null;
+
+            if (totalExamples > 0) {
+                const r = await classifier.predictClass(tf.tensor1d(analysis.vector), K_NEIGHBORS);
+                const conf = r.confidences[r.label] || 0;
+                if (conf >= CONFIDENCE_MIN) knnResult = { label: r.label, confidence: conf };
+            }
+            const mlpUsable = mlpTrained && !mlpDirty;
+            if (mlpUsable) {
+                const r = predictWithMlp(analysis.vector);
+                if (r && r.confidence >= CONFIDENCE_MIN) mlpResult = r;
+            }
+
+            if (mlpUsable && totalExamples > 0) {
+                if (knnResult && mlpResult && knnResult.label === mlpResult.label) detectedLetter = knnResult.label;
+                verificationHint.textContent = 'Verificação: KNN + IA treinada (dupla checagem)';
+            } else {
+                detectedLetter = knnResult ? knnResult.label : null;
+                verificationHint.textContent = mlpTrained
+                    ? 'Verificação: somente KNN (IA desatualizada — treine de novo pra reativar a dupla checagem)'
+                    : 'Verificação: somente KNN (treine a IA na aba Coletar Dados pra dupla checagem)';
+            }
+
+            liveBuffer.push(detectedLetter);
+            if (liveBuffer.length > BUFFER_SIZE) liveBuffer.shift();
+
+            const counts = {};
+            let max = 0, dom = null;
+            for (const l of liveBuffer) {
+                if (l) { counts[l] = (counts[l] || 0) + 1; if (counts[l] > max) { max = counts[l]; dom = l; } }
+            }
+
+            stabilityBar.style.width = `${Math.min((max / CONFIRM_THRESHOLD) * 100, 100)}%`;
+            stabilityBar.style.background = max >= CONFIRM_THRESHOLD ? 'var(--success)' : 'var(--warning)';
+
+            if (max >= CONFIRM_THRESHOLD && dom) {
+                confirmLetter(dom);
+            } else if (max === 0) {
+                resultLetter.textContent = '-';
+                stabilityBar.style.width = '0%';
+                lastSpoken = null;
+            }
+        }
+
+        function handleCollectLandmarks(lm, handedness, tMs, quality) {
+            if (!recording || !lm) return;
+            if (quality && quality.score < QUALITY_MIN_TO_CLASSIFY) return;
+            const analysis = analyzeHand(lm, handedness);
+            if (dynamicModeCheckbox.checked) {
+                collectDynamicBuffer.push({ t: tMs, feats: extractMotionPoint(analysis.points) });
+            } else {
+                classifier.addExample(tf.tensor1d(analysis.vector), letterSelect.value);
+                updateDatasetUI();
+            }
+        }
+
+        // ============================================================
+        // INICIALIZAÇÃO
+        // ============================================================
+        (async function init() {
+            const hadLocal = await loadFromLocalStorage();
+            if (!hadLocal) await tryLoadBundledDataset();
+            updateDatasetUI();
+            updateMlpUI();
+            resetSensorUI();
+            startPipeline();
+        })();
+    </script>
+</body>
+</html>
